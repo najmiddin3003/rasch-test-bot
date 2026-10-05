@@ -12,7 +12,6 @@ services:
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /health
-    autoDeploy: true
     envVars:
       - key: BOT_TOKEN
         sync: false
