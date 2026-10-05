@@ -1,0 +1,23 @@
+{
+  "name": "rasch-test-bot",
+  "version": "1.0.0",
+  "description": "Rasch modeli asosida test javoblarini tekshiruvchi Telegram bot",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
+    "dotenv": "^18.0.5",
+    "exceljs": "^4.4.0",
+    "grammy": "^1.46.0",
+    "mongoose": "^9.10.4"
+  }
+}

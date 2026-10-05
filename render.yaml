@@ -1,0 +1,28 @@
+# Render Blueprint: Dashboard → New → Blueprint → shu repo.
+# Bepul tarifda Background Worker yo'q, shuning uchun bot Web Service sifatida webhook rejimida ishlaydi
+# (RENDER_EXTERNAL_URL ni Render o'zi beradi). 15 daqiqa so'rov bo'lmasa server uxlaydi —
+# Telegram'dan kelgan xabar uni uyg'otadi (birinchi javob ~1 daqiqa kechikishi mumkin).
+services:
+  - type: web
+    name: rasch-test-bot
+    runtime: node
+    plan: free
+    # MongoDB Atlas klasteri Sidneyda — bepul regionlardan eng yaqini Singapur
+    region: singapore
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: MONGODB_DB
+        value: rasch_bot
+      - key: ENABLE_SIMULATE
+        value: "false"
+      - key: WEBHOOK_SECRET
+        generateValue: true
