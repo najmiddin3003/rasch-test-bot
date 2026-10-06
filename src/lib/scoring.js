@@ -17,9 +17,13 @@ export const MAX_T = 75;
 
 // Savollarni tekshirish chegaralari. Simulyatsiyada (33 savol, 30+ qatnashchi) to'g'ri kalitli
 // testda o'rtacha ~0.2 soxta signal, xato kiritilgan kalitlarning 93–100% i ushlanadi.
-// 15 kishidan kam guruhda statistikalar juda shovqinli — faqat "hech kim yechmagan" ko'rsatiladi.
+// 15 kishidan kam guruhda ptbis/infit juda shovqinli — ular ko'rsatilmaydi.
 // Outfit ishlatilmaydi: u oson savoldagi bitta tasodifiy xatoga ham juda sezgir.
+// "Hamma to'g'ri topgan" ogohlantirish emas: xato kalitga hamma bir xil mos kelib qolmaydi
+// (Excel'da faqat izoh sifatida chiqadi). "Hech kim to'g'ri topmagan" juda kichik guruhda
+// tasodif — 1–2 kishilik testda har bir xato javob shunday ko'rinadi.
 const FLAG_MIN_PERSONS = 15;
+const NONE_FLAG_MIN_PERSONS = 5;
 const PTBIS_MIN = -0.1;
 const INFIT_MAX = 1.5; // Linacre: MNSQ > 1.5 — o'lchashga foydasiz
 
@@ -51,11 +55,18 @@ export function toTScores(thetas) {
   return { tScores, mean: m, sd };
 }
 
-/** Savol bo'yicha ogohlantirish (kalit xatosini topishga yordam beradi) yoki null */
-function itemFlag(rasch, i, persons) {
-  if (rasch.constant[i] === 'none') return "Hech kim to'g'ri topmagan — kalitni tekshiring";
-  if (rasch.constant[i] === 'all') return "Hamma to'g'ri topgan — qatnashchilarni farqlamaydi";
-  if (persons < FLAG_MIN_PERSONS) return null;
+/**
+ * Savol bo'yicha ogohlantirish (kalit xatosini topishga yordam beradi) yoki null.
+ * @param {{ participants: number, calibrated: number }} counts jami va ekstremal bo'lmagan qatnashchilar
+ */
+function itemFlag(rasch, i, { participants, calibrated }) {
+  if (rasch.constant[i] === 'all') return null;
+  if (rasch.constant[i] === 'none') {
+    return participants >= NONE_FLAG_MIN_PERSONS
+      ? "Hech kim to'g'ri topmagan — kalitni tekshiring (yoki savol juda qiyin)"
+      : null;
+  }
+  if (calibrated < FLAG_MIN_PERSONS) return null;
   const pt = rasch.itemPtBis[i];
   if (pt !== null && pt < PTBIS_MIN) return "Kuchli o'quvchilar ko'proq xato qilgan — kalit xato bo'lishi mumkin";
   if (rasch.itemInfit[i] > INFIT_MAX) return 'Rasch modeliga mos emas (infit yuqori) — savolni tekshiring';
@@ -96,7 +107,7 @@ export function computeResults(matrix) {
     infit: round(rasch.itemInfit[i], 2),
     outfit: round(rasch.itemOutfit[i], 2),
     ptBiserial: round(rasch.itemPtBis[i], 3),
-    flag: itemFlag(rasch, i, rasch.calibratedPersons),
+    flag: itemFlag(rasch, i, { participants: matrix.length, calibrated: rasch.calibratedPersons }),
   }));
 
   return {

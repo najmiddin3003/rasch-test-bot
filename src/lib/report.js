@@ -14,6 +14,14 @@ function methodName(method) {
   );
 }
 
+/** Ogohlantirish bo'lmagan, lekin bilish foydali holatlar (sariq rang bilan belgilanmaydi) */
+function infoNote(item, participants) {
+  if (!participants || item.correctCount === null || item.correctCount === undefined) return '';
+  if (item.correctCount === participants) return "Hamma to'g'ri topgan (ma'lumot uchun)";
+  if (item.correctCount === 0) return "Hech kim to'g'ri topmagan (ma'lumot uchun)";
+  return '';
+}
+
 function styleHeader(sheet) {
   const row = sheet.getRow(1);
   row.font = HEADER_FONT;
@@ -99,7 +107,7 @@ export async function buildExcelReport(test, submissions) {
       infit: item.infit,
       outfit: item.outfit,
       ptBiserial: item.ptBiserial,
-      flag: item.flag || '',
+      flag: item.flag || infoNote(item, n),
     });
     if (item.flag) row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB9C' } };
   }

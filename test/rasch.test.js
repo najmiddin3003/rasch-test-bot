@@ -67,7 +67,7 @@ test('xato kiritilgan kalit ogohlantirish bilan belgilanadi', () => {
     return b.map((d) => (rand() < logistic(t - d) ? 1 : 0));
   });
   const clean = computeResults(m);
-  assert.equal(clean.items.filter((it) => it.flag && !/Hamma|Hech kim/.test(it.flag)).length, 0);
+  assert.equal(clean.items.filter((it) => it.flag).length, 0);
 
   // 3-savol kaliti xato: to'g'ri yechganlar xato deb, xatolar to'g'ri deb hisoblanadi
   const broken = computeResults(m.map((row) => row.map((x, i) => (i === 2 ? 1 - x : x))));
@@ -77,6 +77,24 @@ test('xato kiritilgan kalit ogohlantirish bilan belgilanadi', () => {
   // Hech kim yechmagan savol
   const none = computeResults(m.map((row) => row.map((x, i) => (i === 5 ? 0 : x))));
   assert.match(none.items[5].flag, /Hech kim/);
+
+  // Hamma yechgan savol — ogohlantirish emas
+  const all = computeResults(m.map((row) => row.map((x, i) => (i === 7 ? 1 : x))));
+  assert.equal(all.items[7].flag, null);
+});
+
+test("kichik guruhda soxta ogohlantirish yo'q (1–2 kishilik sinov testi)", () => {
+  // Foydalanuvchi sinovidagi holat: 14 savol, o'quvchi 11 ta to'g'ri (9, 10, 11b xato)
+  const student = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1];
+  const admin = new Array(14).fill(1);
+  for (const m of [[student], [admin, student]]) {
+    const res = computeResults(m);
+    assert.deepEqual(res.items.filter((it) => it.flag), [], `${m.length} kishi: ogohlantirish bo'lmasligi kerak`);
+  }
+  // "Hech kim yechmagan" — 4 kishida jim, 5 kishidan boshlab ko'rsatiladi
+  const group = (n) => Array.from({ length: n }, (_, k) => student.map((x, i) => (i === 3 ? 0 : (x + k + i) % 2)));
+  assert.equal(computeResults(group(4)).items[3].flag, null);
+  assert.match(computeResults(group(5)).items[3].flag, /Hech kim/);
 });
 
 // Takrorlanuvchi tasodifiy sonlar generatori (mulberry32)

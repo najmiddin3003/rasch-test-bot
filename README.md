@@ -41,7 +41,7 @@ BMBA'ning [baholash mezonlari](https://uzbmb.uz/upload/file/pdf/mtt/Baholash_mez
 ### Natijalarni e'lon qilish
 
 1. «🔒 Yopish va hisoblash» — natijalar hisoblanadi, lekin faqat **adminga** ko'rsatiladi: xulosa, Excel va shubhali savollar ro'yxati.
-2. Shubhali savollar avtomatik aniqlanadi: hech kim yechmagan savol; tuzatilgan nuqta-biserial korrelyatsiya < −0.1 (kuchli o'quvchilar ko'proq xato qilgan — kalit xato bo'lishi mumkin); infit MNSQ > 1.5. Simulyatsiyada 30+ qatnashchili testda xato kiritilgan kalitlarning 93–100% i ushlandi.
+2. Shubhali savollar avtomatik aniqlanadi: hech kim yechmagan savol (5+ qatnashchida); tuzatilgan nuqta-biserial korrelyatsiya < −0.1 (kuchli o'quvchilar ko'proq xato qilgan — kalit xato bo'lishi mumkin); infit MNSQ > 1.5. Simulyatsiyada 30+ qatnashchili testda xato kiritilgan kalitlarning 93–100% i ushlandi.
 3. Kalit xato bo'lsa — «✏️ Kalitni tuzatish» (`7=c`, `31a=12;12.0`). Barcha javoblar qayta tekshiriladi va Rasch qayta hisoblanadi. «🔓 Qayta ochish» bilan testga yana javob qabul qilish mumkin.
 4. «📤 Natijalarni yuborish» — natijalar qatnashchilarga yuboriladi. Shundan keyin kalitni o'zgartirib bo'lmaydi. Bot yuborish jarayonida to'xtab qolsa, qayta ishga tushganda qolganlarini yuboradi.
 
