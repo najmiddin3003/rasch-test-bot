@@ -418,3 +418,63 @@ test("Ishtirokchisiz test: yopilganda hech kimga xabar yuborilmaydi", { skip, ti
   assert.match(lastText(F), /Test yopilgan/);
   assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
 });
+
+test("Testlar ro'yxati: faol testlar yuqorida, tugaganlari 5 tadan, «Oldingi» / «Keyingi»", { skip, timeout: 300000 }, async () => {
+  // Oldingi testlarnikidan tashqari yana 11 ta tugagan test (har xil vaqtda yopilgan)
+  const base = Date.now() - 3600000;
+  await models.Test.insertMany(
+    Array.from({ length: 11 }, (_, k) => ({
+      code: String(900000 + k),
+      name: `Eski test ${k + 1}`,
+      createdBy: ADMIN,
+      items: [{ label: '1', kind: 'closed', options: 4, key: ['a'] }],
+      status: 'closed',
+      closedAt: new Date(base + k * 60000),
+      publishedAt: new Date(base + k * 60000),
+    })),
+  );
+  const finished = await models.Test.find({ status: 'closed' }).sort({ closedAt: -1, _id: -1 });
+  const pages = Math.ceil(finished.length / 5);
+  assert.ok(pages >= 3);
+
+  const buttons = () =>
+    sent.findLast((s) => s.payload.chat_id === ADMIN && s.payload.reply_markup?.inline_keyboard).payload.reply_markup.inline_keyboard.flat();
+  const expectPage = (page, active = []) => {
+    const shown = buttons()
+      .filter((b) => b.callback_data.startsWith('t:view:'))
+      .map((b) => b.callback_data.slice('t:view:'.length));
+    const expected = [...active, ...finished.slice(page * 5, page * 5 + 5)].map((t) => t._id.toString());
+    assert.deepEqual(shown, expected, `${page + 1}-sahifa`);
+    const nav = buttons()
+      .filter((b) => b.callback_data.startsWith('t:list:'))
+      .map((b) => b.text);
+    assert.deepEqual(nav, [...(page > 0 ? ['⬅️ Oldingi'] : []), `${page + 1}/${pages}`, ...(page < pages - 1 ? ['Keyingi ➡️'] : [])]);
+  };
+
+  await message(ADMIN, '📋 Testlar');
+  assert.match(lastText(ADMIN), /Faol testlar: yo'q/);
+  expectPage(0);
+
+  // Faol test har bir sahifada yuqorida, tugaganlari baribir 5 tadan
+  const active = await services.createTest({ name: 'Faol test', createdBy: ADMIN, closedKey: ['a'], closedOptions: [4], openItems: [] });
+  await message(ADMIN, '📋 Testlar');
+  assert.match(lastText(ADMIN), /Faol testlar: 1 ta/);
+  assert.match(lastText(ADMIN), new RegExp(`Tugagan testlar: ${finished.length} ta \\(1–5\\)`));
+  expectPage(0, [active]);
+  await callback(ADMIN, 't:list:1');
+  expectPage(1, [active]);
+  assert.match(lastText(ADMIN), /\(6–10\)/);
+  await callback(ADMIN, `t:list:${pages - 1}`);
+  expectPage(pages - 1, [active]);
+  await callback(ADMIN, 't:list:999');
+  expectPage(pages - 1, [active]);
+
+  // 2-sahifadagi test ochilib, «⬅️ Testlar» bosilsa — yana 2-sahifaga qaytadi
+  await callback(ADMIN, 't:list:1');
+  await callback(ADMIN, `t:view:${finished[6]._id}`);
+  const back = buttons().find((b) => b.text === '⬅️ Testlar');
+  assert.equal(back.callback_data, 't:list:1');
+  await callback(ADMIN, back.callback_data);
+  expectPage(1, [active]);
+  assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
+});

@@ -35,8 +35,14 @@ import { replyWithMenu, resetState, safeEdit, setState, sleep } from './helpers.
 // Telegram xabari 4096 belgidan oshmasligi uchun (ko'rib chiqish va kalit xabarlari)
 const MAX_CLOSED = 150;
 const MAX_OPEN = 60;
-const LIST_PAGE = 10;
 export const MAX_NOTIFY_ATTEMPTS = 3;
+
+// Testlar ro'yxati: tugagan testlar sahifasi va faol testlar (Telegram tugmalar soni cheklangan)
+const LIST_PAGE = 5;
+const MAX_ACTIVE_SHOWN = 20;
+const ACTIVE = { status: { $ne: 'closed' } };
+const FINISHED = { status: 'closed' };
+const FINISHED_ORDER = { closedAt: -1, _id: -1 };
 
 // Yangi test yaratish holatlari (stateData: name, format, options, closedOptions, closedKey, openItems, hasEssay):
 //   nt_name → nt_format → [erkin: nt_options] → nt_closed → nt_open → [erkin: nt_essay] → nt_confirm
@@ -243,38 +249,64 @@ async function participantCounts(testIds) {
   return new Map(rows.map((r) => [r._id.toString(), r.n]));
 }
 
+function testButtonLabel(test, participants) {
+  const icon = test.status === 'open' ? '🟢' : test.status === 'closing' ? '⏳' : test.publishedAt ? '🔴' : '🟡';
+  const name = test.name.length > 28 ? `${test.name.slice(0, 27)}…` : test.name;
+  return `${icon} ${name} · #${test.code} · 👥${participants}`;
+}
+
+/** Tugagan test ro'yxatning qaysi sahifasida turibdi (faol test — birinchi sahifada) */
+async function listPageOf(test) {
+  if (test.status !== 'closed' || !test.closedAt) return 0;
+  const newer = await Test.countDocuments({
+    ...FINISHED,
+    $or: [{ closedAt: { $gt: test.closedAt } }, { closedAt: test.closedAt, _id: { $gt: test._id } }],
+  });
+  return Math.floor(newer / LIST_PAGE);
+}
+
+/**
+ * Testlar ro'yxati: faol testlar doim yuqorida, tugaganlari bazadan 5 tadan olinadi
+ * (oxirgi yopilgani birinchi) va «Oldingi» / «Keyingi» tugmalari bilan varaqlanadi.
+ */
 export async function showTestList(ctx, edit = false, page = 0) {
-  const total = await Test.countDocuments();
-  if (!total) {
+  const [active, activeTotal, finishedTotal] = await Promise.all([
+    Test.find(ACTIVE).sort({ _id: -1 }).limit(MAX_ACTIVE_SHOWN),
+    Test.countDocuments(ACTIVE),
+    Test.countDocuments(FINISHED),
+  ]);
+  if (!activeTotal && !finishedTotal) {
     const text = "Hali test yaratilmagan. «➕ Yangi test» tugmasini bosing.";
     return edit ? safeEdit(ctx, text) : ctx.reply(text);
   }
-  const pages = Math.ceil(total / LIST_PAGE);
+  const pages = Math.max(1, Math.ceil(finishedTotal / LIST_PAGE));
   page = Math.min(Math.max(0, page), pages - 1);
-  const tests = await Test.find()
-    .sort({ createdAt: -1 })
+  const finished = await Test.find(FINISHED)
+    .sort(FINISHED_ORDER)
     .skip(page * LIST_PAGE)
     .limit(LIST_PAGE);
+  const tests = [...active, ...finished];
   const counts = await participantCounts(tests.map((t) => t._id));
   const kb = new InlineKeyboard();
-  for (const t of tests) {
-    const icon = t.status === 'open' ? '🟢' : t.status === 'closing' ? '⏳' : t.publishedAt ? '🔴' : '🟡';
-    const name = t.name.length > 28 ? `${t.name.slice(0, 27)}…` : t.name;
-    kb.text(`${icon} ${name} · #${t.code} · 👥${counts.get(t._id.toString()) || 0}`, `t:view:${t._id}`).row();
-  }
+  for (const t of tests) kb.text(testButtonLabel(t, counts.get(t._id.toString()) || 0), `t:view:${t._id}`).row();
   if (pages > 1) {
-    if (page > 0) kb.text('⬅️', `t:list:${page - 1}`);
+    if (page > 0) kb.text('⬅️ Oldingi', `t:list:${page - 1}`);
     kb.text(`${page + 1}/${pages}`, `t:list:${page}`);
-    if (page < pages - 1) kb.text('➡️', `t:list:${page + 1}`);
+    if (page < pages - 1) kb.text('Keyingi ➡️', `t:list:${page + 1}`);
   }
-  const text = `📋 <b>Testlar</b> (${total} ta)\n🟢 ochiq · 🟡 yopilgan, natija yuborilmagan · 🔴 natija yuborilgan`;
+
+  let text = `📋 <b>Testlar</b>\n🟢 Faol testlar: ${activeTotal ? `${activeTotal} ta` : "yo'q"}`;
+  if (activeTotal > active.length) text += ` (eng yangi ${active.length} tasi ko'rsatilgan — keraksizlarini yoping)`;
+  text += `\n📁 Tugagan testlar: ${finishedTotal ? `${finishedTotal} ta` : "yo'q"}`;
+  if (pages > 1) text += ` (${page * LIST_PAGE + 1}–${page * LIST_PAGE + finished.length})`;
+  text += '\n\n🟢 ochiq · 🟡 yopilgan, natija yuborilmagan · 🔴 yakunlangan';
   return edit ? safeEdit(ctx, text, { reply_markup: kb }) : ctx.reply(text, { ...HTML, reply_markup: kb });
 }
 
 async function showTestCard(ctx, test, edit = true) {
-  const participants = await countSubmissions(test._id);
+  const [participants, listPage] = await Promise.all([countSubmissions(test._id), listPageOf(test)]);
   const text = testSummary(test, participants, ctx.me.username);
-  const extra = { reply_markup: testCardKb(test, participants) };
+  const extra = { reply_markup: testCardKb(test, participants, listPage) };
   if (edit) return safeEdit(ctx, text, extra);
   return ctx.reply(text, { ...HTML, ...extra, link_preview_options: { is_disabled: true } });
 }
@@ -511,10 +543,12 @@ export function registerAdmin(bot) {
           { reply_markup: confirmKb('del', id) },
         );
 
-      case 'delok':
+      case 'delok': {
+        const listPage = await listPageOf(test);
         await deleteTest(test._id);
         await ctx.answerCallbackQuery({ text: "O'chirildi" });
-        return showTestList(ctx, true);
+        return showTestList(ctx, true, listPage);
+      }
     }
   });
 

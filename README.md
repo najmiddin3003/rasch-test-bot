@@ -19,7 +19,7 @@ Test javoblarini **Rasch modeli** (JMLE) asosida baholovchi Telegram bot. Node.j
    - **Ona tili (Milliy sertifikat)**: 1–32 A–D, 33–35 A–F, 36–39 bitta yozma javob, 40–44 ikki yozma javob (a, b), oxirida esse. Admin 35 ta harfli kalitni (`abcd...` yoki `1a2b3c...`) va 14 ta yozma javobni (har qatorda bittadan yoki `36=javob`, muqobillar `;` bilan) kiritadi.
    - **Erkin format**: yopiq savollar variantlari soni (4/5/6), yopiq kalit, yozma kalit (`36a=12`, `37=0.5;1/2`), esse bor/yo'q.
 2. Bot test **kodi** va havolasini beradi (`https://t.me/<bot>?start=<kod>`).
-3. «📋 Testlar» → testni tanlab «🔒 Yopish va hisoblash» (pastda batafsil).
+3. «📋 Testlar» → testni tanlab «🔒 Yopish va hisoblash» (pastda batafsil). Ro'yxatda faol testlar doim tepada, tugagan testlar bazadan 5 tadan olinadi (oxirgi yopilgani birinchi), «⬅️ Oldingi» / «Keyingi ➡️» bilan varaqlanadi.
 
 **O'quvchi**
 1. Birinchi kirishda ism-familiya kiritadi.
