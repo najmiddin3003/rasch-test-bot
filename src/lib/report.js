@@ -159,6 +159,7 @@ export async function buildExcelReport(test, submissions) {
     { k: 'Esse', v: test.hasEssay ? "bor — umumiy ball = (test bali + esse bali) / 2" : "yo'q" },
     { k: 'Qatnashchilar', v: n },
     { k: 'Yopilgan vaqti', v: formatDate(test.closedAt) },
+    ...(test.revision ? [{ k: 'Natija yuborilgandan keyin kalit tuzatilgan', v: `${test.revision} marta` }] : []),
     { k: 'O‘rtacha θ', v: test.stats?.meanTheta },
     { k: 'θ standart og‘ishi', v: test.stats?.sdTheta },
     { k: 'Baholash usuli', v: methodName(test.stats?.method) },

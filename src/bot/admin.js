@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { checkClosedRange, parseClosed, parseKeyFixes, parseKeyForLabels, parseOpenKey } from '../lib/answers.js';
 import { escapeHtml, formatClosedBlock } from '../lib/format.js';
 import { FORMATS, formatTitle, optionRange, optionsSummary } from '../lib/formats.js';
+import { detectKeyShift } from '../lib/keyShift.js';
 import { buildExcelReport } from '../lib/report.js';
 import {
   closeTest,
@@ -36,6 +37,10 @@ import { replyWithMenu, resetState, safeEdit, setState, sleep } from './helpers.
 const MAX_CLOSED = 150;
 const MAX_OPEN = 60;
 export const MAX_NOTIFY_ATTEMPTS = 3;
+
+// Natijalari hozir yuborilayotgan testlar: shu paytda kalitni tuzatib bo'lmaydi, aks holda
+// yuborilayotgan eski natija «yuborildi» deb belgilanib, tuzatilgani yetib bormay qolishi mumkin
+const notifying = new Set();
 
 // Testlar ro'yxati: tugagan testlar sahifasi va faol testlar (Telegram tugmalar soni cheklangan)
 const LIST_PAGE = 5;
@@ -215,9 +220,13 @@ export async function handleAdminText(ctx, text) {
 
   if (state === 'fix_key') {
     const test = await Test.findById(ctx.user.stateData?.testId);
-    if (!test || test.status !== 'closed' || test.publishedAt) {
+    if (!test || test.status !== 'closed') {
       await resetState(ctx);
-      await replyWithMenu(ctx, 'Kalitni faqat yopilgan va natijalari hali yuborilmagan testda tuzatish mumkin.');
+      await replyWithMenu(ctx, 'Kalitni faqat yopilgan testda tuzatish mumkin.');
+      return true;
+    }
+    if (notifying.has(test._id.toString())) {
+      await ctx.reply('⏳ Natijalar hali yuborilmoqda — biroz kutib, qayta yuboring.');
       return true;
     }
     const parsed = parseKeyFixes(text, test.items);
@@ -340,14 +349,18 @@ export async function notifyParticipants(api, test, submissions) {
 
 /** Natijalarni fonda yuborib, tugagach adminga xabar beradi (botni bloklamaydi) */
 export function startNotify(api, test, submissions, adminChatId) {
+  const id = test._id.toString();
+  notifying.add(id);
   notifyParticipants(api, test, submissions)
     .then(({ sent, failed }) => {
       if (adminChatId && (sent || failed)) {
+        const what = test.revision ? 'tuzatilgan natijalar' : 'natijalar';
         const tail = failed ? `, yuborilmadi: ${failed} ta (botni bloklagan yoki ishga tushirmagan)` : '';
-        return api.sendMessage(adminChatId, `📨 #${test.code}: natijalar yuborildi — ${sent} ta${tail}.`);
+        return api.sendMessage(adminChatId, `📨 #${test.code}: ${what} yuborildi — ${sent} ta${tail}.`);
       }
     })
-    .catch((err) => console.error('notifyParticipants:', err));
+    .catch((err) => console.error('notifyParticipants:', err))
+    .finally(() => notifying.delete(id));
 }
 
 export function registerAdmin(bot) {
@@ -489,11 +502,23 @@ export function registerAdmin(bot) {
         }
         await ctx.answerCallbackQuery();
         const flagged = test.items.filter((i) => i.flag).length;
+        const shifted = test.items.filter((i) => i.keyShift).map((i) => i.label);
+        let warning = '';
+        if (shifted.length) {
+          const list = shifted.slice(0, 10).join(', ') + (shifted.length > 10 ? ' ...' : '');
+          warning = `❗ Kalit surilganga o'xshaydi (${list}) — avval «✏️ Kalitni tuzatish» ni ko'ring!\n`;
+        } else if (flagged) {
+          warning = `⚠️ ${flagged} ta savol bo'yicha ogohlantirish bor — kalitni tekshirdingizmi?\n`;
+        }
+        const what = test.revision
+          ? 'tuzatilgan natijalari barcha qatnashchilarga «qayta hisoblandi» deb'
+          : 'natijalari barcha qatnashchilarga';
         return safeEdit(
           ctx,
-          `📤 <b>${escapeHtml(test.name)}</b> natijalari barcha qatnashchilarga yuborilsinmi?\n\n` +
-            (flagged ? `⚠️ ${flagged} ta savol bo'yicha ogohlantirish bor — kalitni tekshirdingizmi?\n` : '') +
-            "Yuborilgandan keyin kalitni o'zgartirib bo'lmaydi.",
+          `📤 <b>${escapeHtml(test.name)}</b> ${what} yuborilsinmi?\n\n` +
+            warning +
+            "Keyin xato topilsa, kalitni tuzatib qayta yuborish mumkin, lekin o'quvchilar ikki xil natija oladi — " +
+            'hozir tekshirib olgan ma\'qul.',
           { reply_markup: confirmKb('publish', id) },
         );
       }
@@ -507,21 +532,31 @@ export function registerAdmin(bot) {
         await ctx.answerCallbackQuery({ text: 'Yuborilmoqda...' });
         await showTestCard(ctx, result.test);
         const real = result.submissions.filter((s) => !s.simulated).length;
-        await ctx.reply(`📨 Natijalar ${real} ta qatnashchiga yuborilmoqda...`);
+        const what = result.test.revision ? 'Tuzatilgan natijalar' : 'Natijalar';
+        await ctx.reply(`📨 ${what} ${real} ta qatnashchiga yuborilmoqda...`);
         startNotify(ctx.api, result.test, result.submissions, ctx.chat.id);
         return;
       }
 
-      case 'fix':
-        if (!awaitingPublish) {
-          return ctx.answerCallbackQuery({ text: "Natijalar yuborilgan — kalitni o'zgartirib bo'lmaydi" });
+      case 'fix': {
+        if (test.status !== 'closed') return ctx.answerCallbackQuery({ text: 'Test hali yopilmagan' });
+        if (notifying.has(id)) {
+          return ctx.answerCallbackQuery({ text: 'Natijalar hali yuborilmoqda — biroz kuting', show_alert: true });
         }
+        const subs = await Submission.find({ test: test._id }, { answers: 1 });
+        if (test.publishedAt && !subs.length) return ctx.answerCallbackQuery({ text: "Bu testda qatnashchilar yo'q" });
         await ctx.answerCallbackQuery();
+        // Kalit surilganga o'xshasa — o'quvchilarning ko'pi yozgan qo'shni savol kaliti taklif qilinadi
+        const suggestions = detectKeyShift(test.items, subs.map((s) => s.answers)).map(({ index, neighbor }) => ({
+          label: test.items[index].label,
+          key: test.items[neighbor].key,
+        }));
         await setState(ctx, 'fix_key', { testId: id });
-        return ctx.reply(fixKeyPrompt(test), { ...HTML, reply_markup: cancelMenu });
+        return ctx.reply(fixKeyPrompt(test, suggestions), { ...HTML, reply_markup: cancelMenu });
+      }
 
       case 'reopen': {
-        if (!awaitingPublish) return ctx.answerCallbackQuery({ text: "Bu testni qayta ochib bo'lmaydi" });
+        if (!awaitingPublish || test.revision) return ctx.answerCallbackQuery({ text: "Bu testni qayta ochib bo'lmaydi" });
         const reopened = await reopenTest(test._id);
         await ctx.answerCallbackQuery({ text: reopened ? 'Test qayta ochildi' : "Holat o'zgargan" });
         return showTestCard(ctx, reopened ?? (await Test.findById(id)) ?? test);

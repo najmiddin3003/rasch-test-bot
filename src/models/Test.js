@@ -13,6 +13,8 @@ const itemSchema = new mongoose.Schema(
     outfit: { type: Number, default: null },
     ptBiserial: { type: Number, default: null },
     flag: { type: String, default: null }, // adminga ogohlantirish (masalan, kalit xato bo'lishi mumkin)
+    // O'quvchilarning ko'pi qaysi qo'shni savol kalitini yozgan (kalit qatori surilgan bo'lishi mumkin)
+    keyShift: { type: String, default: null },
   },
   { _id: false },
 );
@@ -30,6 +32,9 @@ const testSchema = new mongoose.Schema(
     // Yopilgandan keyin natijalar avval adminga ko'rsatiladi; qatnashchilarga
     // faqat admin «Natijalarni yuborish» ni bosgandan keyin yuboriladi
     publishedAt: { type: Date, default: null },
+    // Natijalar yuborilgandan keyin kalit necha marta tuzatilgan: tuzatilgan natijalar
+    // o'quvchilarga «qayta hisoblandi» deb yuboriladi
+    revision: { type: Number, default: 0 },
     stats: {
       participants: { type: Number, default: 0 },
       meanTheta: { type: Number, default: null },

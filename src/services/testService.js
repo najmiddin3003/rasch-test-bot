@@ -3,6 +3,7 @@ import { Submission } from '../models/Submission.js';
 import { User } from '../models/User.js';
 import { checkAnswers } from '../lib/answers.js';
 import { ESSAY_MAX, itemOptions, optionLetters } from '../lib/formats.js';
+import { detectKeyShift, keyShiftFlag } from '../lib/keyShift.js';
 import { computeResults } from '../lib/scoring.js';
 
 async function generateCode() {
@@ -112,7 +113,13 @@ async function computeAndStore(test) {
     item.outfit = has ? r.outfit : null;
     item.ptBiserial = has ? r.ptBiserial : null;
     item.flag = has ? r.flag : null;
+    item.keyShift = null;
   });
+  // Surilgan kalit — eng aniq ogohlantirish, boshqa izohlar o'rniga ko'rsatiladi
+  for (const { index, neighbor, matches } of detectKeyShift(test.items, submissions.map((s) => s.answers))) {
+    test.items[index].keyShift = test.items[neighbor].label;
+    test.items[index].flag = keyShiftFlag(test.items[neighbor], matches);
+  }
   test.stats = result.stats;
   await test.save();
 
@@ -151,14 +158,20 @@ export async function closeTest(testId) {
 }
 
 /**
- * E'lon qilinmagan testda kalitni tuzatish: barcha javoblar qayta tekshiriladi va Rasch qayta hisoblanadi.
+ * Yopilgan testda kalitni tuzatish: barcha javoblar qayta tekshiriladi va Rasch qayta hisoblanadi.
+ * Natijalar yuborilgan bo'lsa, test yana «yuborishni kutmoqda» holatiga qaytadi: admin tekshirib
+ * tasdiqlagach, o'quvchilarga tuzatilgan natija «qayta hisoblandi» deb yuboriladi.
  * @param {Map<string, string[]>} fixes savol nomi → yangi kalit(lar)
  */
 export async function fixKeys(testId, fixes) {
-  const test = await Test.findOne({ _id: testId, status: 'closed', publishedAt: null });
+  const test = await Test.findOne({ _id: testId, status: 'closed' });
   if (!test) return null;
   for (const item of test.items) if (fixes.has(item.label)) item.key = fixes.get(item.label);
   test.markModified('items');
+  if (test.publishedAt) {
+    test.publishedAt = null;
+    test.revision = (test.revision || 0) + 1;
+  }
 
   const submissions = await Submission.find({ test: test._id });
   if (submissions.length) {
@@ -177,10 +190,10 @@ export async function fixKeys(testId, fixes) {
   return computeAndStore(test);
 }
 
-/** E'lon qilinmagan testni qayta ochish (yana javob qabul qiladi) */
+/** Natijalari hech qachon yuborilmagan testni qayta ochish (yana javob qabul qiladi) */
 export async function reopenTest(testId) {
   const test = await Test.findOneAndUpdate(
-    { _id: testId, status: 'closed', publishedAt: null },
+    { _id: testId, status: 'closed', publishedAt: null, revision: { $not: { $gt: 0 } } },
     { $set: { status: 'open', closedAt: null } },
     { returnDocument: 'after' },
   );
@@ -197,6 +210,12 @@ export async function reopenTest(testId) {
 
 /** Natijalarni e'lon qilish. null — test yopilmagan yoki allaqachon e'lon qilingan */
 export async function publishTest(testId) {
+  // Kalit tuzatilgandan keyin — tuzatilgan natija hammaga qaytadan yuboriladi
+  // (belgilar e'londan oldin tozalanadi: bot to'xtab qolsa, qayta ishga tushganda davom etadi)
+  const pending = await Test.findOne({ _id: testId, status: 'closed', publishedAt: null });
+  if (pending?.revision) {
+    await Submission.updateMany({ test: pending._id }, { $set: { notified: false, notifyAttempts: 0 } });
+  }
   const test = await Test.findOneAndUpdate(
     { _id: testId, status: 'closed', publishedAt: null },
     { $set: { publishedAt: new Date() } },

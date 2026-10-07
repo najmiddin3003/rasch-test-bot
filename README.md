@@ -49,8 +49,10 @@ BMBA'ning [baholash mezonlari](https://uzbmb.uz/upload/file/pdf/mtt/Baholash_mez
 
 1. «🔒 Yopish va hisoblash» — natijalar hisoblanadi, lekin faqat **adminga** ko'rsatiladi: xulosa, Excel va shubhali savollar ro'yxati.
 2. Shubhali savollar avtomatik aniqlanadi: hech kim yechmagan savol (5+ qatnashchida); tuzatilgan nuqta-biserial korrelyatsiya < −0.1 (kuchli o'quvchilar ko'proq xato qilgan — kalit xato bo'lishi mumkin); infit MNSQ > 1.5. Simulyatsiyada 30+ qatnashchili testda xato kiritilgan kalitlarning 93–100% i ushlandi.
+   **Surilgan kalit** ham aniqlanadi: kalit kiritishda bitta javob ikki qatorga bo'linib ketsa yoki tushib qolsa, o'quvchilarning javoblari qo'shni savol kalitiga mos keladi. Bot «Kalit surilganga o'xshaydi: 6 kishi 39-savol kalitini yozgan» deb ogohlantiradi va «✏️ Kalitni tuzatish» da tayyor tuzatishni taklif qiladi (yozma savolda 5+ qatnashchi, yopiq savolda kamida 3 ta ketma-ket savol).
 3. Kalit xato bo'lsa — «✏️ Kalitni tuzatish» (`7=c`, `31a=12;12.0`). Barcha javoblar qayta tekshiriladi va Rasch qayta hisoblanadi. «🔓 Qayta ochish» bilan testga yana javob qabul qilish mumkin.
-4. «📤 Natijalarni yuborish» — natijalar qatnashchilarga yuboriladi. Shundan keyin kalitni o'zgartirib bo'lmaydi. Bot yuborish jarayonida to'xtab qolsa, qayta ishga tushganda qolganlarini yuboradi.
+4. «📤 Natijalarni yuborish» — natijalar qatnashchilarga yuboriladi. Bot yuborish jarayonida to'xtab qolsa, qayta ishga tushganda qolganlarini yuboradi.
+5. Natijalar yuborilgandan keyin xato topilsa ham «✏️ Kalitni tuzatish» mumkin: natijalar qayta hisoblanadi, test yana «yuborishni kutmoqda» holatiga qaytadi va «📤 Natijalarni yuborish» bosilganda har bir o'quvchiga «Natijangiz qayta hisoblandi» deb yangi natija boradi. Bunday testni qayta ochib bo'lmaydi.
 
 Hech kim javob yubormagan test yopilsa, hisob-kitob va yuborish bosqichi bo'lmaydi: adminga «Ishtirokchilar mavjud emas — test yopildi» deb chiqadi, hech kimga xabar yuborilmaydi. Yopishdan oldin bot javob kiritishni boshlagan, lekin hali yubormagan o'quvchilar sonini ham ogohlantiradi.
 

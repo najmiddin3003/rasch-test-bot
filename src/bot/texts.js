@@ -40,7 +40,9 @@ export function help(isAdmin) {
       "36–39 va 40–44 a/b yozma, esse) yoki erkin format.\n" +
       "«📋 Testlar» — testlar ro'yxati, yopish, Excel hisobot.\n" +
       'Test yopilganda natijalar avval faqat sizga ko\'rsatiladi: shubhali savollarni tekshirib, ' +
-      'kerak bo\'lsa kalitni tuzating, keyin «📤 Natijalarni yuborish» ni bosing.';
+      'kerak bo\'lsa kalitni tuzating, keyin «📤 Natijalarni yuborish» ni bosing.\n' +
+      "Natijalar yuborilgandan keyin xato topilsa ham «✏️ Kalitni tuzatish» mumkin — o'quvchilarga " +
+      "tuzatilgan natija «qayta hisoblandi» deb yuboriladi.";
   }
   return text;
 }
@@ -55,8 +57,10 @@ export function testSummary(test, participants, botUsername) {
   let status;
   if (test.status === 'open') status = '🟢 Ochiq';
   else if (test.status === 'closing') status = '⏳ Hisoblanmoqda';
+  else if (!test.publishedAt && test.revision) status = '🟡 Kalit tuzatildi — tuzatilgan natijalar hali yuborilmagan';
   else if (!test.publishedAt) status = `🟡 Yopilgan (${formatDate(test.closedAt)}), natijalar hali yuborilmagan`;
   else if (!participants) status = `🔴 Yopilgan (${formatDate(test.closedAt)}), ishtirokchilar bo'lmagan`;
+  else if (test.revision) status = `🔴 Yopilgan, tuzatilgan natijalar yuborilgan (${formatDate(test.publishedAt)})`;
   else status = `🔴 Yopilgan, natijalar yuborilgan (${formatDate(test.publishedAt)})`;
   return (
     `📝 <b>${escapeHtml(test.name)}</b>\n\n` +
@@ -213,6 +217,7 @@ export function studentResult(test, submission) {
   const wrong = test.items.filter((_, i) => !submission.correct[i]).map((i) => i.label);
   const percent = total ? ((submission.rawScore / total) * 100).toFixed(1) : '0';
   let text =
+    (test.revision ? "🔄 <b>Natijangiz qayta hisoblandi</b> — kalitdagi xato tuzatildi. Avvalgi natija o'rniga shu natija amal qiladi.\n\n" : '') +
     `📊 <b>Test natijasi</b>\n` +
     `📝 ${escapeHtml(test.name)} (#${test.code})\n` +
     `👤 ${escapeHtml(submission.fullName)}\n\n` +
@@ -263,9 +268,14 @@ function withFlagged(test, head, tail) {
   return head + flaggedItemsText(test, 0) + tail;
 }
 
+const labelList = (labels, max = 10) =>
+  labels.slice(0, max).join(', ') + (labels.length > max ? ` va yana ${labels.length - max} ta` : '');
+
 export function adminCloseSummary(test, submissions) {
   const n = submissions.length;
-  const head = test.publishedAt ? '📊 <b>Natijalar</b>' : '🔒 <b>Test yopildi va hisoblandi</b>';
+  let head = '🔒 <b>Test yopildi va hisoblandi</b>';
+  if (test.publishedAt) head = '📊 <b>Natijalar</b>';
+  else if (test.revision) head = '✏️ <b>Kalit tuzatildi, natijalar qayta hisoblandi</b>';
   let text = `${head}: ${escapeHtml(test.name)} (#${test.code})\n👥 Qatnashchilar: <b>${n}</b>\n`;
   if (!n) return text + '\nHech kim javob yubormagan.';
 
@@ -298,6 +308,12 @@ export function adminCloseSummary(test, submissions) {
     text += `\n📐 Ishonchlilik: ${st.reliability.toFixed(2)} (Rasch), KR-20: ${st.kr20 === null ? '—' : st.kr20.toFixed(2)}`;
   }
   let tail = '';
+  const shifted = test.items.filter((i) => i.keyShift).map((i) => i.label);
+  if (shifted.length) {
+    tail +=
+      `\n\n❗ <b>Kalit surilganga o'xshaydi</b> (${labelList(shifted)}): o'quvchilarning ko'pi qo'shni savol ` +
+      "javobini yozgan. «✏️ Kalitni tuzatish» ni bosing — bot to'g'rilash taklifini ko'rsatadi.";
+  }
   if (n < 30) {
     tail += `\n\n⚠️ Qatnashchilar soni kam (${n} &lt; 30) — Rasch baholari aniqligi past bo'lishi mumkin.`;
   }
@@ -307,7 +323,11 @@ export function adminCloseSummary(test, submissions) {
   if (st.method === 'CML+prior') {
     tail += "\nℹ️ Javoblar to'liq «zinapoya» shaklida (Guttman) — aniq CML yechimi yo'q, zaif prior ishlatildi.";
   }
-  if (!test.publishedAt) {
+  if (!test.publishedAt && test.revision) {
+    tail +=
+      "\n\n❗ Tuzatilgan natijalar hali o'quvchilarga <b>yuborilmadi</b>. Tekshirib, «📤 Natijalarni yuborish» ni " +
+      "bosing — o'quvchilarga «natija qayta hisoblandi» deb boradi.";
+  } else if (!test.publishedAt) {
     tail +=
       '\n\n❗ Natijalar hali qatnashchilarga <b>yuborilmadi</b>. Tekshirib chiqing: kalit xato bo\'lsa ' +
       '«✏️ Kalitni tuzatish», hammasi to\'g\'ri bo\'lsa «📤 Natijalarni yuborish» ni bosing.';
@@ -315,15 +335,40 @@ export function adminCloseSummary(test, submissions) {
   return withFlagged(test, text, tail);
 }
 
-export function fixKeyPrompt(test) {
-  return withFlagged(
-    test,
-    '✏️ <b>Kalitni tuzatish</b>\n\n' +
-      'Tuzatiladigan savollarni yuboring — har qatorda bitta:\n' +
-      '<code>7=c\n37=javob;muqobil javob</code>\n\n' +
-      "Barcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi.",
-    '',
-  );
+/**
+ * @param {{ label: string, key: string[] }[]} [suggestions] surilgan kalit uchun taklif:
+ *   savol → qo'shni savolning kaliti (o'quvchilarning ko'pi shuni yozgan)
+ */
+export function fixKeyPrompt(test, suggestions = []) {
+  let head = '✏️ <b>Kalitni tuzatish</b>\n\n';
+  if (test.publishedAt) {
+    head +=
+      "⚠️ Natijalar o'quvchilarga yuborilgan. Kalit tuzatilgach natijalar qayta hisoblanadi va siz " +
+      "«📤 Natijalarni yuborish» ni bosganingizda o'quvchilarga yangi natija «qayta hisoblandi» deb boradi.\n\n";
+  }
+  head +=
+    'Tuzatiladigan savollarni yuboring — har qatorda bitta:\n' +
+    '<code>7=c\n37=javob;muqobil javob</code>\n\n' +
+    "Barcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi.";
+  if (suggestions.length) {
+    const lines = [];
+    let size = 0;
+    for (const s of suggestions) {
+      const line = `${s.label}=${s.key.join(';')}`;
+      if (size + line.length > 1500) {
+        lines.push('...');
+        break;
+      }
+      lines.push(line);
+      size += line.length + 1;
+    }
+    head +=
+      "\n\n🤖 <b>Bot taklifi</b> — kalit surilganga o'xshaydi: o'quvchilarning ko'pi bu savollarga qo'shni " +
+      `savol javobini yozgan:\n<code>${escapeHtml(lines.join('\n'))}</code>\n` +
+      "To'g'ri bo'lsa, nusxalab yuboring. Surilish boshlangan va tugagan joydagi savollarni (masalan, tushib " +
+      "qolgan javobni) o'zingiz qo'shing.";
+  }
+  return withFlagged(test, head, '');
 }
 
 export function myResultsText(rows) {
@@ -334,6 +379,7 @@ export function myResultsText(rows) {
       .map(({ test, sub }) => {
         const name = `${escapeHtml(test?.name ?? "O'chirilgan test")}${test ? ` (#${test.code})` : ''}`;
         const score = scoreOf(sub);
+        if (test?.revision && !test.publishedAt) return `🔄 ${name}\n   Natijalar qayta hisoblanmoqda`;
         if (!test?.publishedAt || score === null || score === undefined) {
           return `⏳ ${name}\n   Natijalar hali e'lon qilinmagan`;
         }

@@ -478,3 +478,80 @@ test("Testlar ro'yxati: faol testlar yuqorida, tugaganlari 5 tadan, «Oldingi» 
   expectPage(1, [active]);
   assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
 });
+
+const lastButtons = (chatId) =>
+  sent
+    .findLast((s) => s.payload.chat_id === chatId && s.payload.reply_markup?.inline_keyboard)
+    .payload.reply_markup.inline_keyboard.flat()
+    .map((b) => b.callback_data);
+
+async function waitNotified(testId, count) {
+  for (let i = 0; i < 150; i++) {
+    if ((await models.Submission.countDocuments({ test: testId, notified: true })) === count) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.fail('natijalar yuborilmadi');
+}
+
+test("Natija yuborilgandan keyin: surilgan kalit aniqlanadi, tuzatiladi va natija qayta yuboriladi", { skip, timeout: 300000 }, async () => {
+  // O'qituvchi yozma kalitni kiritishda 4-qatorga ortiqcha javob yozgan va «besh» ni tushirib qoldirgan
+  const truth = ['bir', 'ikki', 'uch', "to'rt", 'besh', 'olti'];
+  const typed = ['bir', 'x', 'ikki', 'uch', "to'rt", 'olti'];
+  const t = await services.createTest({
+    name: 'Surilgan kalit',
+    createdBy: ADMIN,
+    closedKey: ['a', 'b'],
+    closedOptions: [4, 4],
+    openItems: typed.map((key, i) => ({ label: String(i + 3), key: [key] })),
+  });
+  const ids = Array.from({ length: 8 }, (_, k) => 5001 + k);
+  for (const [k, id] of ids.entries()) {
+    const openAnswers = truth.map((a, j) => ((k + j) % 4 === 0 ? 'xato' : a));
+    await services.submitAnswers(t, { telegramId: id, fullName: `O'quvchi ${k + 1}`, username: null }, ['a', k % 2 ? 'b' : 'c', ...openAnswers]);
+  }
+
+  // Yopilganda bot surilgan qatorni ko'rsatadi
+  await callback(ADMIN, `t:closeok:${t._id}`);
+  let doc = await models.Test.findById(t._id);
+  assert.deepEqual(doc.items.filter((i) => i.keyShift).map((i) => `${i.label}→${i.keyShift}`), ['4→5', '5→6', '6→7']);
+  assert.ok(textsTo(ADMIN).some((x) => x.includes("Kalit surilganga o'xshaydi</b> (4, 5, 6)")));
+  await callback(ADMIN, `t:publish:${t._id}`);
+  assert.match(lastText(ADMIN), /Kalit surilganga o'xshaydi \(4, 5, 6\)/);
+
+  // Admin baribir yuboradi — o'quvchilar xato natija oladi
+  await callback(ADMIN, `t:publishok:${t._id}`);
+  await waitNotified(t._id, 8);
+  const old = await models.Submission.findOne({ test: t._id, userId: ids[1] });
+  assert.doesNotMatch(lastText(ids[1]), /qayta hisoblandi/);
+
+  // Natija yuborilgan testda ham «Kalitni tuzatish» bor va bot taklif beradi
+  await callback(ADMIN, `t:view:${t._id}`);
+  assert.ok(lastButtons(ADMIN).includes(`t:fix:${t._id}`));
+  await callback(ADMIN, `t:fix:${t._id}`);
+  assert.match(lastText(ADMIN), /Natijalar o'quvchilarga yuborilgan/);
+  assert.match(lastText(ADMIN), /Bot taklifi[\s\S]*<code>4=ikki\n5=uch\n6=to'rt<\/code>/);
+  await message(ADMIN, "4=ikki\n5=uch\n6=to'rt\n7=besh");
+
+  doc = await models.Test.findById(t._id);
+  assert.equal(doc.publishedAt, null, 'test yana «yuborishni kutmoqda» holatida');
+  assert.equal(doc.revision, 1);
+  assert.equal(doc.items.filter((i) => i.keyShift).length, 0);
+  assert.ok(textsTo(ADMIN).some((x) => x.includes('Kalit tuzatildi, natijalar qayta hisoblandi')));
+  const card = lastButtons(ADMIN);
+  assert.ok(card.includes(`t:publish:${t._id}`));
+  assert.ok(!card.includes(`t:reopen:${t._id}`), 'natijasi yuborilgan testni qayta ochib bo\'lmaydi');
+  await callback(ADMIN, `t:reopen:${t._id}`, 1);
+  assert.equal((await models.Test.findById(t._id)).status, 'closed');
+
+  // Qayta yuborish: hamma tuzatilgan natijani «qayta hisoblandi» deb oladi
+  await callback(ADMIN, `t:publish:${t._id}`);
+  assert.match(lastText(ADMIN), /tuzatilgan natijalari barcha qatnashchilarga «qayta hisoblandi» deb yuborilsinmi/);
+  await callback(ADMIN, `t:publishok:${t._id}`);
+  await waitNotified(t._id, 8);
+  const fixed = await models.Submission.findOne({ test: t._id, userId: ids[1] });
+  assert.ok(fixed.rawScore > old.rawScore, `${old.rawScore} → ${fixed.rawScore}`);
+  assert.match(lastText(ids[1]), /Natijangiz qayta hisoblandi/);
+  assert.match(lastText(ids[1]), new RegExp(`To'g'ri javoblar: <b>${fixed.rawScore}/8</b>`));
+  assert.ok(textsTo(ADMIN).some((x) => x.includes('tuzatilgan natijalar yuborildi — 8 ta')));
+  assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
+});

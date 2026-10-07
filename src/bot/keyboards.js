@@ -71,9 +71,15 @@ export function testCardKb(test, participants, listPage = 0) {
   if (test.status === 'open') kb.text('🔒 Yopish va hisoblash', `t:close:${id}`).row();
   if (test.status === 'closed' && !test.publishedAt) {
     kb.text('📤 Natijalarni yuborish', `t:publish:${id}`).row();
-    kb.text('✏️ Kalitni tuzatish', `t:fix:${id}`).text('🔓 Qayta ochish', `t:reopen:${id}`).row();
+    kb.text('✏️ Kalitni tuzatish', `t:fix:${id}`);
+    // Natijalari bir marta yuborilgan testga yangi javob qabul qilinmaydi
+    if (!test.revision) kb.text('🔓 Qayta ochish', `t:reopen:${id}`);
+    kb.row();
   }
-  if (test.status === 'closed' && participants) kb.text('📥 Excel hisobot', `t:report:${id}`).row();
+  if (test.status === 'closed' && participants) {
+    if (test.publishedAt) kb.text('✏️ Kalitni tuzatish', `t:fix:${id}`);
+    kb.text('📥 Excel hisobot', `t:report:${id}`).row();
+  }
   kb.text('🔑 Kalit', `t:key:${id}`).text("🗑 O'chirish", `t:del:${id}`).row();
   kb.text('⬅️ Testlar', `t:list:${listPage}`);
   return kb;

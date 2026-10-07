@@ -41,6 +41,7 @@ const items = [
     key: ['a'],
     correctCount: 1,
     flag: i < 20 ? "Kuchli o'quvchilar ko'proq xato qilgan — kalit xato bo'lishi mumkin" : null,
+    keyShift: i >= 20 && i < 40 ? String(i + 2) : null,
   })),
   ...Array.from({ length: 60 }, (_, i) => ({
     label: `${151 + i}a`,
@@ -62,6 +63,7 @@ for (const n of [0, 2, 29, 31]) {
         items,
         status: 'closed',
         publishedAt: n % 2 ? new Date() : null,
+        revision: n > 2 ? 1 : 0,
         closedAt: new Date(),
         createdAt: new Date(),
         stats: { participants: n, method: 'CML+prior', reliability: 0.8, kr20: 0.82, converged: n !== 2 },
@@ -96,6 +98,7 @@ for (const n of [0, 2, 29, 31]) {
         preview: submissionPreview(t, answers, { essay: 58, essaySkipped: false }),
         summary: adminCloseSummary(t, subs),
         fix: fixKeyPrompt(t),
+        fixWithSuggestions: fixKeyPrompt(t, items.map((it) => ({ label: it.label, key: [evil.repeat(20), 'x<y'] }))),
         myResults: myResultsText(subs.slice(0, 10).map((sub) => ({ test: t, sub }))),
       };
       if (n) texts.result = studentResult(t, subs[0]) + studentResult(t, subs.at(-1));
