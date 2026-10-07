@@ -8,6 +8,7 @@ import { FORMATS, formatTitle, optionRange, optionsSummary } from '../lib/format
 import { buildExcelReport } from '../lib/report.js';
 import {
   closeTest,
+  countAnswering,
   countSubmissions,
   createTest,
   deleteTest,
@@ -271,8 +272,9 @@ export async function showTestList(ctx, edit = false, page = 0) {
 }
 
 async function showTestCard(ctx, test, edit = true) {
-  const text = testSummary(test, await countSubmissions(test._id), ctx.me.username);
-  const extra = { reply_markup: testCardKb(test) };
+  const participants = await countSubmissions(test._id);
+  const text = testSummary(test, participants, ctx.me.username);
+  const extra = { reply_markup: testCardKb(test, participants) };
   if (edit) return safeEdit(ctx, text, extra);
   return ctx.reply(text, { ...HTML, ...extra, link_preview_options: { is_disabled: true } });
 }
@@ -417,25 +419,33 @@ export function registerAdmin(bot) {
         await ctx.answerCallbackQuery();
         return ctx.reply(keyText(test), HTML);
 
-      case 'close':
+      case 'close': {
         await ctx.answerCallbackQuery();
-        return safeEdit(
-          ctx,
-          `🔒 <b>${escapeHtml(test.name)}</b> testini yopasizmi?\n\n` +
-            "Yopilgandan keyin javoblar qabul qilinmaydi. Natijalar Rasch modeli bo'yicha hisoblanib, avval " +
-            "faqat sizga ko'rsatiladi — qatnashchilarga siz tasdiqlaganingizdan keyin yuboriladi.",
-          { reply_markup: confirmKb('close', id) },
-        );
+        const [participants, answering] = await Promise.all([countSubmissions(test._id), countAnswering(test._id)]);
+        let text = `🔒 <b>${escapeHtml(test.name)}</b> testini yopasizmi?\n\n`;
+        text += participants
+          ? "Yopilgandan keyin javoblar qabul qilinmaydi. Natijalar Rasch modeli bo'yicha hisoblanib, avval " +
+            "faqat sizga ko'rsatiladi — qatnashchilarga siz tasdiqlaganingizdan keyin yuboriladi."
+          : 'Hali hech kim javob yubormagan — test natijasiz yopiladi, hech kimga xabar yuborilmaydi.';
+        if (answering) {
+          text +=
+            `\n\n⚠️ ${answering} ta o'quvchi javob kiritishni boshlagan, lekin hali yubormagan — ` +
+            'test yopilsa, ularning javoblari qabul qilinmaydi.';
+        }
+        return safeEdit(ctx, text, { reply_markup: confirmKb('close', id) });
+      }
 
       case 'closeok': {
-        await ctx.answerCallbackQuery({ text: 'Hisoblanmoqda...' });
-        await safeEdit(ctx, '⏳ Natijalar hisoblanmoqda...');
+        await ctx.answerCallbackQuery();
+        await safeEdit(ctx, '⏳ Test yopilmoqda...');
         const result = await closeTest(test._id);
         if (!result) {
           const fresh = await Test.findById(id);
           return showTestCard(ctx, fresh);
         }
         await showTestCard(ctx, result.test);
+        // Qatnashchi yo'q: xulosa, Excel va natija yuborish bosqichi kerak emas
+        if (!result.submissions.length) return ctx.reply('🔒 Ishtirokchilar mavjud emas — test yopildi.');
         await ctx.reply(adminCloseSummary(result.test, result.submissions), HTML);
         if (result.submissions.length) await sendReport(ctx, result.test, result.submissions);
         return showTestCard(ctx, result.test, false);

@@ -115,6 +115,12 @@ test("natija xabari: esseli testda test bali, esse va umumiy ball ko'rsatiladi",
   assert.match(skipped, /Esse bali: <b>0 \(kiritilmagan\)<\/b>/);
 });
 
+test("ishtirokchisiz yopilgan test kartasi: «natijalar yuborilgan» emas", () => {
+  const t = { name: 'Bo\'sh', code: '1', items: [{ label: '1', kind: 'closed' }], status: 'closed', closedAt: new Date(), publishedAt: new Date(), createdAt: new Date() };
+  assert.match(testSummary(t, 0, 'bot'), /Yopilgan \(.*\), ishtirokchilar bo'lmagan/);
+  assert.match(testSummary(t, 3, 'bot'), /natijalar yuborilgan/);
+});
+
 test("uzun kalitlar va ko'p ogohlantirish ham 4096 belgiga sig'adi", () => {
   const long = 'juda uzun javob '.repeat(12);
   const t = {

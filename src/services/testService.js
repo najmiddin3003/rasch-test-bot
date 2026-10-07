@@ -1,5 +1,6 @@
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
+import { User } from '../models/User.js';
 import { checkAnswers } from '../lib/answers.js';
 import { ESSAY_MAX, itemOptions, optionLetters } from '../lib/formats.js';
 import { computeResults } from '../lib/scoring.js';
@@ -33,6 +34,14 @@ export function findTestByCode(code) {
 
 export function countSubmissions(testId) {
   return Submission.countDocuments({ test: testId });
+}
+
+// O'quvchi javob kiritayotgan holatlar (bot/student.js)
+const ANSWERING_STATES = ['st_answer', 'st_essay', 'st_confirm'];
+
+/** Testga javob kiritishni boshlagan, lekin hali yubormagan o'quvchilar soni */
+export function countAnswering(testId) {
+  return User.countDocuments({ state: { $in: ANSWERING_STATES }, 'stateData.testId': String(testId) });
 }
 
 export class SubmitError extends Error {}
@@ -113,7 +122,8 @@ async function computeAndStore(test) {
 
 /**
  * Testni yopadi va Rasch bo'yicha hisoblaydi. Natijalar hali qatnashchilarga yuborilmaydi —
- * admin tekshirib, publishTest() ni chaqirishi kerak.
+ * admin tekshirib, publishTest() ni chaqirishi kerak. Qatnashchi bo'lmasa, test darhol
+ * yakunlanadi: tekshiradigan va yuboradigan natija yo'q.
  * @returns {Promise<{ test, submissions } | null>} null — test allaqachon yopilgan/yopilmoqda
  */
 export async function closeTest(testId) {
@@ -128,7 +138,12 @@ export async function closeTest(testId) {
     test.status = 'closed';
     test.closedAt = new Date();
     test.publishedAt = null;
-    return await computeAndStore(test);
+    const result = await computeAndStore(test);
+    if (!result.submissions.length) {
+      test.publishedAt = test.closedAt;
+      await test.save();
+    }
+    return result;
   } catch (err) {
     await Test.updateOne({ _id: test._id }, { $set: { status: 'open' } });
     throw err;

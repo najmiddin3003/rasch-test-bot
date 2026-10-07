@@ -52,6 +52,8 @@ BMBA'ning [baholash mezonlari](https://uzbmb.uz/upload/file/pdf/mtt/Baholash_mez
 3. Kalit xato bo'lsa — «✏️ Kalitni tuzatish» (`7=c`, `31a=12;12.0`). Barcha javoblar qayta tekshiriladi va Rasch qayta hisoblanadi. «🔓 Qayta ochish» bilan testga yana javob qabul qilish mumkin.
 4. «📤 Natijalarni yuborish» — natijalar qatnashchilarga yuboriladi. Shundan keyin kalitni o'zgartirib bo'lmaydi. Bot yuborish jarayonida to'xtab qolsa, qayta ishga tushganda qolganlarini yuboradi.
 
+Hech kim javob yubormagan test yopilsa, hisob-kitob va yuborish bosqichi bo'lmaydi: adminga «Ishtirokchilar mavjud emas — test yopildi» deb chiqadi, hech kimga xabar yuborilmaydi. Yopishdan oldin bot javob kiritishni boshlagan, lekin hali yubormagan o'quvchilar sonini ham ogohlantiradi.
+
 Ochiq javoblar solishtirilganda katta-kichik harf va bo'shliqlar e'tiborga olinmaydi, sonlar qiymati bo'yicha tekshiriladi (`0,5` = `0.5` = `1/2`), kirill klaviaturada terilgan o'xshash harflar lotinga o'giriladi.
 
 ## Render'ga joylash (bepul tarif)

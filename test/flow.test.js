@@ -384,3 +384,37 @@ test('Erkin format: 5 variantli tugmalar, essesiz', { skip, timeout: 300000 }, a
   assert.equal(sub.totalScore, sub.tScore, "essesiz testda umumiy ball — T-ball");
   assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
 });
+
+test("Ishtirokchisiz test: yopilganda hech kimga xabar yuborilmaydi", { skip, timeout: 300000 }, async () => {
+  const t = await services.createTest({ name: "Bo'sh test", createdBy: ADMIN, closedKey: ['a', 'b'], closedOptions: [4, 4], openItems: [] });
+  // O'quvchi javob kiritishni boshlagan, lekin yubormagan — yopishdan oldin admin ogohlantiriladi
+  const F = 4001;
+  await message(F, `/start ${t.code}`);
+  await message(F, "O'quvchi F");
+  await callback(ADMIN, `t:close:${t._id}`);
+  assert.match(lastText(ADMIN), /Hali hech kim javob yubormagan/);
+  assert.match(lastText(ADMIN), /1 ta o'quvchi javob kiritishni boshlagan/);
+
+  const start = sent.length;
+  await callback(ADMIN, `t:closeok:${t._id}`);
+  const messages = sent.slice(start).filter((s) => s.method.startsWith('send') || s.method.startsWith('edit'));
+  const closed = await models.Test.findById(t._id);
+  assert.equal(closed.status, 'closed');
+  assert.ok(closed.publishedAt, "natija yuborish bosqichi bo'lmaydi — test darhol yakunlanadi");
+  assert.ok(messages.every((s) => s.payload.chat_id === ADMIN), 'admindan boshqa hech kimga xabar yuborilmaydi');
+  assert.ok(!messages.some((s) => s.method === 'sendDocument'), 'Excel yuborilmaydi');
+  assert.ok(!messages.some((s) => /hisoblandi/.test(s.payload.text)), 'xulosa yuborilmaydi');
+  assert.equal(lastText(ADMIN), '🔒 Ishtirokchilar mavjud emas — test yopildi.');
+  const card = messages.find((s) => s.payload.reply_markup?.inline_keyboard);
+  assert.match(card.payload.text, /Yopilgan .*ishtirokchilar bo'lmagan/);
+  assert.deepEqual(
+    card.payload.reply_markup.inline_keyboard.flat().map((b) => b.callback_data.split(':')[1]),
+    ['key', 'del', 'list'],
+    "yuborish, tuzatish va Excel tugmalari yo'q",
+  );
+
+  // O'quvchi davom etsa — test yopilgani aytiladi
+  await callback(F, 'q:0:a');
+  assert.match(lastText(F), /Test yopilgan/);
+  assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
+});

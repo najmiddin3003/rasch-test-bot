@@ -56,6 +56,7 @@ export function testSummary(test, participants, botUsername) {
   if (test.status === 'open') status = '🟢 Ochiq';
   else if (test.status === 'closing') status = '⏳ Hisoblanmoqda';
   else if (!test.publishedAt) status = `🟡 Yopilgan (${formatDate(test.closedAt)}), natijalar hali yuborilmagan`;
+  else if (!participants) status = `🔴 Yopilgan (${formatDate(test.closedAt)}), ishtirokchilar bo'lmagan`;
   else status = `🔴 Yopilgan, natijalar yuborilgan (${formatDate(test.publishedAt)})`;
   return (
     `📝 <b>${escapeHtml(test.name)}</b>\n\n` +

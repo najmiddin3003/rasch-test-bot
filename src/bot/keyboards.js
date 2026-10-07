@@ -64,7 +64,7 @@ export const submitConfirmKb = new InlineKeyboard()
   .text('✅ Tasdiqlash', 'sub:confirm')
   .text('🔄 Boshidan kiritish', 'sub:retry');
 
-export function testCardKb(test) {
+export function testCardKb(test, participants) {
   const id = test._id.toString();
   const kb = new InlineKeyboard();
   if (test.status === 'open') kb.text('🔒 Yopish va hisoblash', `t:close:${id}`).row();
@@ -72,7 +72,7 @@ export function testCardKb(test) {
     kb.text('📤 Natijalarni yuborish', `t:publish:${id}`).row();
     kb.text('✏️ Kalitni tuzatish', `t:fix:${id}`).text('🔓 Qayta ochish', `t:reopen:${id}`).row();
   }
-  if (test.status === 'closed') kb.text('📥 Excel hisobot', `t:report:${id}`).row();
+  if (test.status === 'closed' && participants) kb.text('📥 Excel hisobot', `t:report:${id}`).row();
   kb.text('🔑 Kalit', `t:key:${id}`).text("🗑 O'chirish", `t:del:${id}`).row();
   kb.text('⬅️ Testlar', 't:list:0');
   return kb;
