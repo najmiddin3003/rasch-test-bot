@@ -1,6 +1,7 @@
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { checkAnswers } from '../lib/answers.js';
+import { ESSAY_MAX, optionLetters } from '../lib/formats.js';
 import { computeResults } from '../lib/scoring.js';
 
 async function generateCode() {
@@ -12,15 +13,18 @@ async function generateCode() {
 }
 
 /**
- * @param {{ name: string, createdBy: number, closedKey: string[], openItems: {label: string, key: string[]}[] }} data
+ * @param {{
+ *   name: string, createdBy: number, closedKey: string[], closedOptions: number[],
+ *   openItems: {label: string, key: string[]}[], format?: string, hasEssay?: boolean
+ * }} data
  */
-export async function createTest({ name, createdBy, closedKey, openItems }) {
+export async function createTest({ name, createdBy, closedKey, closedOptions, openItems, format = 'free', hasEssay = false }) {
   const items = [
-    ...closedKey.map((letter, i) => ({ label: String(i + 1), kind: 'closed', key: [letter] })),
+    ...closedKey.map((letter, i) => ({ label: String(i + 1), kind: 'closed', options: closedOptions[i], key: [letter] })),
     ...openItems.map((o) => ({ label: o.label, kind: 'open', key: o.key })),
   ];
   const code = await generateCode();
-  return Test.create({ code, name, createdBy, items });
+  return Test.create({ code, name, createdBy, format, hasEssay, items });
 }
 
 export function findTestByCode(code) {
@@ -33,7 +37,10 @@ export function countSubmissions(testId) {
 
 export class SubmitError extends Error {}
 
-export async function submitAnswers(test, user, answers) {
+/**
+ * @param {{ essay?: number|null, essaySkipped?: boolean }} [essayInfo] esse bali (0–75) — faqat esseli testda
+ */
+export async function submitAnswers(test, user, answers, { essay = null, essaySkipped = false } = {}) {
   const fresh = await Test.findById(test._id);
   if (!fresh || fresh.status !== 'open') throw new SubmitError('Bu test yopilgan, javoblar qabul qilinmaydi.');
   const correct = checkAnswers(fresh.items, answers);
@@ -46,6 +53,8 @@ export async function submitAnswers(test, user, answers) {
       answers,
       correct,
       rawScore: correct.reduce((a, b) => a + b, 0),
+      essay: fresh.hasEssay ? (essay ?? 0) : null,
+      essaySkipped: fresh.hasEssay ? essaySkipped || essay === null : false,
     });
   } catch (err) {
     if (err?.code === 11000) throw new SubmitError('Siz bu testga allaqachon javob yuborgansiz.');
@@ -56,7 +65,11 @@ export async function submitAnswers(test, user, answers) {
 /** Rasch bo'yicha hisoblab, natijalarni Submission va Test hujjatlariga yozadi (test.save() ham) */
 async function computeAndStore(test) {
   const submissions = await Submission.find({ test: test._id }).sort({ createdAt: 1 });
-  const result = computeResults(submissions.map((s) => s.correct));
+  const essays = test.hasEssay ? submissions.map((s) => s.essay ?? 0) : null;
+  const result = computeResults(
+    submissions.map((s) => s.correct),
+    { essays },
+  );
 
   if (submissions.length) {
     await Submission.bulkWrite(
@@ -68,6 +81,7 @@ async function computeAndStore(test) {
               theta: p.theta,
               se: p.se,
               tScore: p.tScore,
+              totalScore: p.total,
               grade: p.grade,
               rank: p.rank,
               infit: p.infit,
@@ -158,7 +172,9 @@ export async function reopenTest(testId) {
   if (test) {
     await Submission.updateMany(
       { test: test._id },
-      { $set: { theta: null, se: null, tScore: null, grade: null, rank: null, infit: null, outfit: null } },
+      {
+        $set: { theta: null, se: null, tScore: null, totalScore: null, grade: null, rank: null, infit: null, outfit: null },
+      },
     );
   }
   return test;
@@ -227,13 +243,15 @@ export async function simulateSubmissions(test, count) {
       const ok = Math.random() < logistic(theta - difficulties[i]);
       if (item.kind === 'closed') {
         if (ok) return item.key[0];
-        const wrong = [...'abcd'].filter((l) => l !== item.key[0]);
+        const wrong = [...optionLetters(item.options)].filter((l) => l !== item.key[0]);
         return wrong[Math.floor(Math.random() * wrong.length)];
       }
       return ok ? item.key[0] : 'xato';
     });
     const correct = checkAnswers(test.items, answers);
     const n = existing + k + 1;
+    // Esse bali qobiliyat bilan bog'liq: o'rtacha ~55, [0; 75]
+    const essay = test.hasEssay ? Math.min(ESSAY_MAX, Math.max(0, Math.round((55 + 10 * theta + 5 * gauss()) * 2) / 2)) : null;
     docs.push({
       test: test._id,
       userId: -n,
@@ -241,6 +259,7 @@ export async function simulateSubmissions(test, count) {
       answers,
       correct,
       rawScore: correct.reduce((a, b) => a + b, 0),
+      essay,
       simulated: true,
     });
   }

@@ -74,30 +74,42 @@ function itemFlag(rasch, i, { participants, calibrated }) {
 }
 
 /**
- * Javoblar matritsasidan to'liq natija: har bir qatnashchi uchun θ, T-ball,
- * daraja va o'rin; har bir savol uchun qiyinlik va moslik statistikalari.
+ * Javoblar matritsasidan to'liq natija: har bir qatnashchi uchun θ, T-ball (test qismi),
+ * yakuniy ball, daraja va o'rin; har bir savol uchun qiyinlik va moslik statistikalari.
+ *
+ * Esse bo'lsa (BMBA: ona tili va adabiyot): yakuniy ball = (test bali + esse bali) / 2,
+ * ikkalasi ham 75 ballik shkalada; daraja va o'rin yakuniy ball bo'yicha.
  * @param {number[][]} matrix
+ * @param {{ essays?: (number|null)[] | null }} [options] har bir qatnashchining esse bali (0–75);
+ *   null — testda esse yo'q
  */
-export function computeResults(matrix) {
+export function computeResults(matrix, { essays = null } = {}) {
   const rasch = estimateRasch(matrix);
   const { tScores, mean, sd } = toTScores(rasch.theta);
 
-  const persons = rasch.theta.map((theta, idx) => ({
-    index: idx,
-    rawScore: rasch.personScores[idx],
-    theta: round(theta, 3),
-    se: round(rasch.thetaSe[idx], 3),
-    tScore: tScores[idx],
-    grade: gradeFor(tScores[idx]),
-    infit: round(rasch.personInfit[idx], 2),
-    outfit: round(rasch.personOutfit[idx], 2),
-    rank: null,
-  }));
+  const persons = rasch.theta.map((theta, idx) => {
+    const tScore = tScores[idx];
+    const essay = essays ? (essays[idx] ?? 0) : null;
+    const total = essays ? round((tScore + essay) / 2, 1) : tScore;
+    return {
+      index: idx,
+      rawScore: rasch.personScores[idx],
+      theta: round(theta, 3),
+      se: round(rasch.thetaSe[idx], 3),
+      tScore,
+      essay,
+      total,
+      grade: gradeFor(total),
+      infit: round(rasch.personInfit[idx], 2),
+      outfit: round(rasch.personOutfit[idx], 2),
+      rank: null,
+    };
+  });
 
-  // O'rin: T-ball bo'yicha kamayish tartibida, tenglarga bir xil o'rin
-  const sorted = [...persons].sort((a, b) => b.tScore - a.tScore);
+  // O'rin: yakuniy ball bo'yicha kamayish tartibida, tenglarga bir xil o'rin
+  const sorted = [...persons].sort((a, b) => b.total - a.total);
   sorted.forEach((p, i) => {
-    p.rank = i > 0 && p.tScore === sorted[i - 1].tScore ? sorted[i - 1].rank : i + 1;
+    p.rank = i > 0 && p.total === sorted[i - 1].total ? sorted[i - 1].rank : i + 1;
   });
 
   const items = rasch.difficulty.map((d, i) => ({

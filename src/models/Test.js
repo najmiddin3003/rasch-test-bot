@@ -4,6 +4,7 @@ const itemSchema = new mongoose.Schema(
   {
     label: { type: String, required: true }, // "1", "2", ..., "36a", "36b"
     kind: { type: String, enum: ['closed', 'open'], required: true },
+    options: { type: Number, default: null }, // yopiq savol variantlari soni: 4 (A–D) … 6 (A–F)
     key: { type: [String], required: true }, // yopiq: ["b"], ochiq: ["0.5", "1/2"]
     correctCount: { type: Number, default: null },
     difficulty: { type: Number, default: null }, // Rasch qiyinligi (logit)
@@ -21,6 +22,8 @@ const testSchema = new mongoose.Schema(
     code: { type: String, required: true, unique: true },
     name: { type: String, required: true },
     createdBy: { type: Number, required: true },
+    format: { type: String, enum: ['ona_tili', 'free'], default: 'free' },
+    hasEssay: { type: Boolean, default: false }, // o'quvchi oxirida esse balini (0–75) kiritadi
     items: { type: [itemSchema], required: true },
     status: { type: String, enum: ['open', 'closing', 'closed'], default: 'open', index: true },
     closedAt: { type: Date, default: null },

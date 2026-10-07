@@ -17,8 +17,11 @@ const skip = !uri && 'MONGODB_URI berilmagan — oqim testi o\'tkazib yuborildi'
 let bot;
 let mongoose;
 let models;
+let services;
+let gradeFor;
 const sent = [];
 let updateId = 1;
+let messageCounter = 1000;
 
 const BOT_INFO = {
   id: 1,
@@ -49,7 +52,19 @@ function message(userId, text) {
   });
 }
 
-function callback(userId, data) {
+/** Shu chatdagi oxirgi xabar(lar) ichidan berilgan tugmani topadi (xabar ID si bilan) */
+function findButtonMessage(chatId, data) {
+  for (let i = sent.length - 1; i >= 0; i--) {
+    const s = sent[i];
+    if (s.payload?.chat_id !== chatId || !s.payload.reply_markup?.inline_keyboard) continue;
+    if (s.payload.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === data)) return s.messageId;
+  }
+  return null;
+}
+
+/** Tugmani bosish. messageId berilmasa — tugma turgan oxirgi xabar */
+function callback(userId, data, messageId = undefined) {
+  const id = messageId ?? findButtonMessage(userId, data) ?? 1;
   return bot.handleUpdate({
     update_id: updateId++,
     callback_query: {
@@ -58,7 +73,7 @@ function callback(userId, data) {
       chat_instance: '1',
       data,
       message: {
-        message_id: 1,
+        message_id: id,
         date: Math.floor(Date.now() / 1000),
         chat: { id: userId, type: 'private' },
         from: { ...BOT_INFO },
@@ -70,6 +85,7 @@ function callback(userId, data) {
 
 const textsTo = (chatId) => sent.filter((s) => s.payload.chat_id === chatId && s.payload.text).map((s) => s.payload.text);
 const lastText = (chatId) => textsTo(chatId).at(-1) ?? '';
+const userState = async (id) => (await models.User.findOne({ telegramId: id })).toObject();
 
 before(async () => {
   if (skip) return;
@@ -83,6 +99,8 @@ before(async () => {
     User: (await import('../src/models/User.js')).User,
   };
   await Promise.all(Object.values(models).map((m) => m.init()));
+  services = await import('../src/services/testService.js');
+  ({ gradeFor } = await import('../src/lib/scoring.js'));
 
   const { createBot } = await import('../src/bot/index.js');
   bot = createBot('123:TEST', { botInfo: BOT_INFO });
@@ -90,16 +108,17 @@ before(async () => {
     // Haqiqiy Telegram kabi: HTML rejimida noma'lum teg yoki qochirilmagan "<" — xato
     if (payload?.parse_mode === 'HTML' && typeof payload.text === 'string') {
       const stripped = payload.text.replace(/<\/?(b|i|u|s|code|pre|a)(\s[^>]*)?>/g, '');
-      if (stripped.includes('<') || /&(?!amp;|lt;|gt;|quot;|#\d+;)/.test(stripped)) {
+      if (stripped.includes('<') || /&(?!amp;|lt;|gt;|quot;|#\d+;)/.test(stripped) || payload.text.length > 4096) {
         sent.push({ method, payload, rejected: true });
         return { ok: false, error_code: 400, description: "Bad Request: can't parse entities" };
       }
     }
-    sent.push({ method, payload });
+    const messageId = method.startsWith('send') ? ++messageCounter : payload?.message_id;
+    sent.push({ method, payload, messageId });
     if (method.startsWith('send') || method === 'editMessageText') {
       return {
         ok: true,
-        result: { message_id: sent.length, date: 0, chat: { id: payload.chat_id, type: 'private' }, text: payload.text },
+        result: { message_id: messageId, date: 0, chat: { id: payload.chat_id, type: 'private' }, text: payload.text },
       };
     }
     return { ok: true, result: true };
@@ -112,144 +131,243 @@ after(async () => {
   await mongoose.disconnect();
 });
 
-test("to'liq oqim: test yaratish → javoblar → yopish → Rasch natijalari", { skip, timeout: 600000 }, async () => {
-  // --- Admin ro'yxatdan o'tadi va test yaratadi
-  await message(ADMIN, '/start');
-  assert.match(lastText(ADMIN), /Ism-familiyangizni/);
-  await message(ADMIN, 'Admin Testov');
-  assert.match(lastText(ADMIN), /Assalomu alaykum/);
+// Ona tili shabloni: 1–32 A–D, 33–35 A–F
+const CLOSED_KEY = [...Array(32)].map((_, i) => 'abcd'[(i * 3) % 4]).concat(['e', 'f', 'b']);
+const OPEN_KEY = [
+  "36=o'g'il",
+  '37=—',
+  '38=tutuq belgisi',
+  '39=12',
+  '40a=ot',
+  '40b=kesim',
+  '41a=ega',
+  '41b=aniqlovchi',
+  '42a=7',
+  '42b=0,5',
+  '43a=Navoiy',
+  '43b=Bobur',
+  '44a=ʼ',
+  '44b=.',
+].join('\n');
+// Hammasi to'g'ri, lekin tutuq/tire/kasr/nuqta boshqacha yozilgan
+const OPEN_ALL_RIGHT = ['o‘g‘il', 'tire', '`', '12', 'Ot', 'kesim', 'ega', 'aniqlovchi', '7', '1/2', 'navoiy', 'Bobur.', 'tutuq belgisi', 'nuqta'];
 
+/** Yopiq savollarni tugmalar bilan yechish: letters[i] — '' bo'lsa «O'tkazish» */
+async function answerClosedByButtons(userId, letters) {
+  for (let pos = 0; pos < letters.length; pos++) {
+    await callback(userId, `q:${pos}:${letters[pos] || 's'}`);
+  }
+}
+
+/** Yozma savollar: '' bo'lsa «O'tkazish», aks holda matn */
+async function answerOpen(userId, firstPos, answers) {
+  for (let k = 0; k < answers.length; k++) {
+    if (answers[k]) await message(userId, answers[k]);
+    else await callback(userId, `o:${firstPos + k}:s`);
+  }
+}
+
+test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, yopish va e'lon", { skip, timeout: 900000 }, async () => {
+  // --- Admin ro'yxatdan o'tadi va shablon bo'yicha test yaratadi
+  await message(ADMIN, '/start');
+  await message(ADMIN, 'Admin Testov');
   await message(ADMIN, '➕ Yangi test');
-  await message(ADMIN, 'Matematika sinov');
-  await message(ADMIN, 'abcdzz');
-  assert.match(lastText(ADMIN), /Noto'g'ri belgilar/);
-  await message(ADMIN, '1a2b3c4d5a6b7c8d9a10b');
-  assert.match(lastText(ADMIN), /Ochiq savollar kalitini/);
-  await message(ADMIN, '11a=12\n11b=-3\n12=0.5;1/2');
-  assert.match(lastText(ADMIN), /Jami savollar: <b>13<\/b>/);
+  await message(ADMIN, 'Ona tili sinov');
+  assert.match(lastText(ADMIN), /formatini/);
+  await callback(ADMIN, 'nt:fmt:ona_tili');
+  assert.match(lastText(ADMIN), /35 ta harf \(1–32: A–D, 33–35: A–F\)/);
+  // 1-savolga E — variantdan tashqari, rad etiladi
+  await message(ADMIN, 'e' + CLOSED_KEY.slice(1).join(''));
+  assert.match(lastText(ADMIN), /1-savolda faqat A–D/);
+  await message(ADMIN, CLOSED_KEY.join(''));
+  assert.match(lastText(ADMIN), /14 ta javob/);
+  await message(ADMIN, OPEN_KEY);
+  assert.match(lastText(ADMIN), /Esse:<\/b> bor/);
   await callback(ADMIN, 'nt:save');
 
-  const created = await models.Test.findOne({ name: 'Matematika sinov' });
+  const created = await models.Test.findOne({ name: 'Ona tili sinov' });
   assert.ok(created, 'test bazaga saqlanishi kerak');
-  assert.equal(created.items.length, 13);
-  assert.deepEqual(created.items[12].key, ['0.5', '1/2']);
-  assert.ok(textsTo(ADMIN).some((t) => t.includes(`?start=${created.code}`)));
+  assert.equal(created.format, 'ona_tili');
+  assert.equal(created.hasEssay, true);
+  assert.equal(created.items.length, 49);
+  assert.deepEqual(created.items.slice(0, 35).map((i) => i.options), [...Array(32).fill(4), 6, 6, 6]);
+  assert.deepEqual(created.items.slice(35).map((i) => i.label), ['36', '37', '38', '39', '40a', '40b', '41a', '41b', '42a', '42b', '43a', '43b', '44a', '44b']);
 
-  // --- O'quvchi bo'lmagan foydalanuvchi admin tugmasidan foydalana olmaydi
-  await message(5000, '/start');
-  await message(5000, 'Begona Odam');
-  await message(5000, '📋 Testlar');
-  assert.match(lastText(5000), /faqat adminlar/);
+  const code = created.code;
+  const A = 2001; // hammasi tugmalar bilan, hammasi to'g'ri, esse 61,5
+  const B = 2002; // yopiq — bitta matnda, ba'zilarini o'tkazadi, esseni o'tkazadi, keyin tuzatadi
+  const C = 2003; // yopiq — ikki marta bosish va eski tugma sinovi, esse 75
+  const D = 2004; // o'rtacha, esse 0
 
-  // --- 30 ta o'quvchi bir vaqtda javob yuboradi (qobiliyati bo'yicha har xil)
-  const key = 'abcdabcdab';
-  const students = Array.from({ length: 30 }, (_, k) => 2001 + k);
-  await Promise.all(students.map(async (id, k) => {
-    const correctClosed = Math.round((k / 29) * 10); // 0..10 ta to'g'ri
-    const closed = [...key].map((l, i) => (i < correctClosed ? l : l === 'a' ? 'b' : 'a')).join('');
-    await message(id, `/start ${created.code}`);
-    await message(id, `O'quvchi ${k + 1}`);
-    assert.match(lastText(id), /Yopiq savollar: <b>1–10<\/b>/);
-    if (k === 0) {
-      await message(id, 'abc');
-      assert.match(lastText(id), /10 ta javob kerak/);
-    }
-    await message(id, closed);
-    assert.match(lastText(id), /Ochiq savollar: <b>11a, 11b, 12<\/b>/);
-    const strong = k >= 15;
-    await message(id, strong ? '12\n−3\n0,5' : k % 2 ? '12\n-\n3' : '1\n2\n3');
-    assert.match(lastText(id), /Javoblaringizni tekshiring/);
-    await callback(id, 'sub:confirm');
-    assert.match(lastText(id), /qabul qilindi/);
-  }));
+  await Promise.all(
+    [A, B, C, D].map(async (id, k) => {
+      await message(id, `/start ${code}`);
+      await message(id, `O'quvchi ${k + 1}`);
+    }),
+  );
+  assert.match(lastText(A), /yopiq savollar\n.* 1\/35/);
+  assert.match(lastText(A), /1-savol<\/b> — javobni tanlang/);
+
+  // 6 variantli savolda E/F tugmalari bor, 4 variantlida yo'q
+  const firstClosedMsg = sent.findLast((s) => s.payload.chat_id === A && s.payload.reply_markup);
+  const buttons = firstClosedMsg.payload.reply_markup.inline_keyboard.flat().map((b) => b.text);
+  assert.deepEqual(buttons, ['A', 'B', 'C', 'D', "⏭ O'tkazish"]);
+
+  const wrongOf = (l) => (l === 'a' ? 'b' : 'a');
+
+  await Promise.all([
+    (async () => {
+      await answerClosedByButtons(A, CLOSED_KEY);
+      // 6 variantli savollar xabarida E va F tugmalari bo'lgan
+      const six = sent.filter((s) => s.payload.chat_id === A && s.payload.reply_markup?.inline_keyboard?.flat().some((b) => b.callback_data === 'q:33:f'));
+      assert.ok(six.length, '33–35-savollarda A–F tugmalari');
+      assert.match(lastText(A), /36-savol<\/b> — javobingizni yozing/);
+      await answerOpen(A, 35, OPEN_ALL_RIGHT);
+      assert.match(lastText(A), /Esse bali/);
+      await message(A, '80');
+      assert.match(lastText(A), /0 dan 75 gacha/);
+      await message(A, '61,5');
+      assert.match(lastText(A), /Javoblaringizni tekshiring/);
+      assert.match(lastText(A), /Esse:<\/b> 61\.5/);
+      await callback(A, 'sub:confirm');
+      assert.match(lastText(A), /qabul qilindi/);
+    })(),
+    (async () => {
+      // Yopiq javoblar bitta matnda: 3 tasi xato, 2 tasi javobsiz
+      const bulk = CLOSED_KEY.map((l, i) => (i < 3 ? wrongOf(l) : i === 10 || i === 20 ? 'x' : l));
+      await message(B, bulk.map((l, i) => `${i + 1}${l}`).join(' '));
+      assert.match(lastText(B), /36-savol<\/b> — javobingizni yozing/);
+      // 36 o'tkaziladi, 37 — oddiy chiziqcha (tire), qolganlari aralash
+      await answerOpen(B, 35, ['', '-', 'xato', '12', 'ot', 'xato', 'ega', 'xato', '7', '0.5', 'xato', 'Bobur', "'", 'xato']);
+      await callback(B, 'e:s');
+      assert.match(lastText(B), /Esse:<\/b> 0 \(kiritilmagan\)/);
+      assert.match(lastText(B), /Javobsiz: 11, 21, 36/);
+      // Tasdiqlashdan oldin tuzatish: 36 va esse
+      await message(B, "36=o'g'il\nesse=40");
+      assert.match(lastText(B), /Esse:<\/b> 40\.0/);
+      assert.match(lastText(B), /36:<\/code> o'g'il/);
+      await callback(B, 'sub:confirm');
+      assert.match(lastText(B), /qabul qilindi/);
+    })(),
+    (async () => {
+      // 1-savol: A bosiladi va xuddi shu tugma yana bosiladi (ikki marta bosish) — e'tiborga olinmaydi
+      const msgId = findButtonMessage(C, 'q:0:a');
+      await callback(C, 'q:0:a', msgId);
+      await callback(C, 'q:0:b', msgId);
+      let st = (await userState(C)).stateData;
+      assert.equal(st.pos, 1);
+      assert.equal(st.answers[0], 'a', 'ikkinchi bosish 1-savolni o\'zgartirmasligi kerak');
+      // Boshqa (eski) xabardagi tugma ham e'tiborga olinmaydi
+      await callback(C, 'q:1:c', msgId + 99999);
+      st = (await userState(C)).stateData;
+      assert.equal(st.pos, 1);
+      const letters = CLOSED_KEY.map((l, i) => (i === 0 ? null : i % 5 === 0 ? '' : l)).slice(1);
+      for (let k = 0; k < letters.length; k++) await callback(C, `q:${k + 1}:${letters[k] || 's'}`);
+      await answerOpen(C, 35, OPEN_ALL_RIGHT.map((a, i) => (i % 2 ? a : '')));
+      await message(C, '75');
+      await callback(C, 'sub:confirm');
+      assert.match(lastText(C), /qabul qilindi/);
+    })(),
+    (async () => {
+      await answerClosedByButtons(D, CLOSED_KEY.map((l, i) => (i % 2 ? wrongOf(l) : l)));
+      await answerOpen(D, 35, ['xato', 'tire', 'xato', 'xato', 'ot', 'xato', 'xato', 'xato', '7', 'xato', 'xato', 'xato', 'xato', 'xato']);
+      await message(D, '0');
+      await callback(D, 'sub:confirm');
+    })(),
+  ]);
+
+  // --- Saqlangan javoblar
+  const subA = await models.Submission.findOne({ test: created._id, userId: A });
+  assert.equal(subA.rawScore, 49, "tutuq/tire/kasr/nuqtaning boshqa yozilishi ham to'g'ri hisoblanishi kerak");
+  assert.equal(subA.essay, 61.5);
+  assert.equal(subA.essaySkipped, false);
+
+  const subB = await models.Submission.findOne({ test: created._id, userId: B });
+  assert.equal(subB.answers[35], "o'g'il", 'tuzatilgan javob saqlanadi');
+  assert.equal(subB.answers[10], '');
+  assert.equal(subB.correct[36], 1, "37: oddiy '-' tire bilan teng");
+  assert.equal(subB.correct[47], 1, "44a: ' tutuq belgisi bilan teng");
+  assert.equal(subB.essay, 40);
+  assert.equal(subB.essaySkipped, false);
+
+  const subC = await models.Submission.findOne({ test: created._id, userId: C });
+  assert.equal(subC.answers[0], 'a');
+  assert.equal(subC.answers[5], '', "«O'tkazish» bosilgan savol javobsiz");
+  assert.equal(subC.essay, 75);
+
+  const subD = await models.Submission.findOne({ test: created._id, userId: D });
+  assert.equal(subD.essay, 0);
+  assert.equal(subD.essaySkipped, false);
 
   // Takroriy urinish rad etiladi
-  await message(2001, created.code);
-  assert.match(lastText(2001), /allaqachon|javob yuborgansiz/);
+  await message(A, code);
+  assert.match(lastText(A), /javob yuborgansiz/);
 
-  const subs = await models.Submission.find({ test: created._id });
-  assert.equal(subs.length, 30);
-  const strongSub = subs.find((s) => s.userId === 2030);
-  assert.equal(strongSub.rawScore, 13, "eng kuchli o'quvchi hammasini to'g'ri topgan");
+  // --- Rasch uchun yetarli qatnashchi: 30 ta sinov qatnashchisi (esse bilan)
+  await services.simulateSubmissions(created, 30);
 
-  // HTML maxsus belgilarli noto'g'ri javob — xato xabari qochirilgan holda keladi (audit topilmasi)
-  await message(5000, `/start ${created.code}`);
-  await message(5000, '1a 2b <3c & 4d');
-  assert.match(lastText(5000), /&lt;/);
-  await message(5000, '/cancel');
-
-  // --- Admin testni yopadi: natijalar faqat adminga ko'rsatiladi
+  // --- Yopish: umumiy ball = (test + esse) / 2, daraja va o'rin umumiy ball bo'yicha
   await callback(ADMIN, `t:closeok:${created._id}`);
-  let closed = await models.Test.findById(created._id);
+  const closed = await models.Test.findById(created._id);
   assert.equal(closed.status, 'closed');
-  assert.equal(closed.publishedAt, null);
-  assert.equal(closed.stats.participants, 30);
-  // Bu testdagi javoblar ataylab "zinapoya" (Guttman) shaklida — sof CML yechimi yo'q, prior ishlatiladi
-  assert.equal(closed.stats.method, 'CML+prior');
-  assert.ok(closed.stats.converged);
+  assert.equal(closed.stats.participants, 34);
+  assert.ok(textsTo(ADMIN).some((t) => t.includes('Umumiy ball = (test bali + esse bali) / 2')));
   assert.ok(sent.some((s) => s.method === 'sendDocument' && s.payload.chat_id === ADMIN), 'Excel hisobot yuboriladi');
-  assert.ok(textsTo(ADMIN).some((t) => t.includes('yuborilmadi')));
-  assert.equal(await models.Submission.countDocuments({ test: created._id, notified: true }), 0);
-  assert.match(lastText(2030), /qabul qilindi/, "e'londan oldin o'quvchiga natija bormaydi");
-  await message(2030, '📊 Natijalarim');
-  assert.match(lastText(2030), /e'lon qilinmagan/);
 
-  // --- Kalitni tuzatish: 10-savol "a" deb o'zgartiriladi → to'g'ri yechganlar ballari kamayadi
-  await callback(ADMIN, `t:fix:${created._id}`);
-  assert.match(lastText(ADMIN), /Kalitni tuzatish/);
-  await message(ADMIN, '10=a');
-  closed = await models.Test.findById(created._id);
-  assert.deepEqual(closed.items[9].key, ['a']);
-  assert.equal((await models.Submission.findOne({ test: created._id, userId: 2030 })).rawScore, 12);
-  // ...va qaytariladi
-  await callback(ADMIN, `t:fix:${created._id}`);
-  await message(ADMIN, '10=b');
-  assert.equal((await models.Submission.findOne({ test: created._id, userId: 2030 })).rawScore, 13);
+  const all = await models.Submission.find({ test: created._id }).sort({ rank: 1 });
+  for (const s of all) {
+    assert.ok(Math.abs(s.totalScore - (s.tScore + (s.essay ?? 0)) / 2) <= 0.05 + 1e-9, `${s.fullName}: umumiy ball`);
+    assert.equal(s.grade, gradeFor(s.totalScore));
+    assert.ok(s.tScore <= 75 && s.totalScore <= 75);
+  }
+  for (let i = 1; i < all.length; i++) assert.ok(all[i - 1].totalScore >= all[i].totalScore, "o'rin umumiy ball bo'yicha");
 
-  // --- Qayta ochish: yangi qatnashchi qo'shiladi, keyin yana yopiladi
-  await callback(ADMIN, `t:reopen:${created._id}`);
-  assert.equal((await models.Test.findById(created._id)).status, 'open');
-  await message(3001, `/start ${created.code}`);
-  await message(3001, 'Kechikkan Talaba');
-  await message(3001, '1a2b3c4d5a6b7c8d9a10b');
-  await message(3001, '12\n-3\n1/2');
-  await callback(3001, 'sub:confirm');
-  assert.match(lastText(3001), /qabul qilindi/);
-  await callback(ADMIN, `t:closeok:${created._id}`);
-  assert.equal((await models.Test.findById(created._id)).stats.participants, 31);
-
-  // --- E'lon qilish: endi natijalar fonda yuboriladi
-  await callback(ADMIN, `t:publish:${created._id}`);
-  assert.match(lastText(ADMIN), /yuborilsinmi/);
+  // --- E'lon qilish
   await callback(ADMIN, `t:publishok:${created._id}`);
   for (let i = 0; i < 150; i++) {
-    if ((await models.Submission.countDocuments({ test: created._id, notified: true })) === 31) break;
+    if ((await models.Submission.countDocuments({ test: created._id, simulated: false, notified: true })) === 4) break;
     await new Promise((r) => setTimeout(r, 100));
   }
-  const ranked = await models.Submission.find({ test: created._id }).sort({ rank: 1 });
-  assert.ok(ranked.every((s) => s.notified && s.tScore !== null && s.rank >= 1));
-  assert.ok(ranked.every((s) => s.tScore <= 75), 'maksimal ball 75');
-  // Ko'proq to'g'ri javob — yuqoriroq T-ball; bir xil ball — bir xil T
-  for (let i = 1; i < ranked.length; i++) {
-    assert.ok(ranked[i - 1].rawScore >= ranked[i].rawScore);
-    if (ranked[i - 1].rawScore === ranked[i].rawScore) assert.equal(ranked[i - 1].tScore, ranked[i].tScore);
-  }
-  const top = await models.Submission.findOne({ test: created._id, userId: 2030 });
-  assert.equal(top.rank, 1);
-  assert.match(lastText(2030), /Rasch bali \(T\)/);
-  assert.match(lastText(2030), /O'rin: 1\/31/);
-  await message(2030, '📊 Natijalarim');
-  assert.match(lastText(2030), /ball, A/);
-
-  // E'londan keyin kalitni tuzatib bo'lmaydi
-  await callback(ADMIN, `t:fix:${created._id}`);
-  assert.notEqual((await models.User.findOne({ telegramId: ADMIN })).state, 'fix_key');
-
-  // Yopilgan testga javob qabul qilinmaydi
-  await message(5000, created.code);
-  assert.match(lastText(5000), /yopilgan/);
+  assert.match(lastText(A), /Test bali \(Rasch\)/);
+  assert.match(lastText(A), /Esse bali: <b>61\.5<\/b>/);
+  assert.match(lastText(A), /Umumiy ball/);
+  assert.match(lastText(D), /Esse bali: <b>0\.0<\/b>/);
 
   // Telegram rad etgan xabar va kutilmagan xatolik bo'lmagan
   assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
   assert.ok(!sent.some((s) => String(s.payload.text).includes('Kutilmagan xatolik')));
+});
+
+test('Erkin format: 5 variantli tugmalar, essesiz', { skip, timeout: 300000 }, async () => {
+  await message(ADMIN, '➕ Yangi test');
+  await message(ADMIN, 'Erkin sinov');
+  await callback(ADMIN, 'nt:fmt:free');
+  await callback(ADMIN, 'nt:opt:5');
+  await message(ADMIN, 'abcde');
+  await message(ADMIN, '6=Toshkent');
+  await callback(ADMIN, 'nt:essay:0');
+  assert.match(lastText(ADMIN), /Esse:<\/b> yo'q/);
+  await callback(ADMIN, 'nt:save');
+  const t = await models.Test.findOne({ name: 'Erkin sinov' });
+  assert.equal(t.format, 'free');
+  assert.equal(t.hasEssay, false);
+  assert.deepEqual(t.items.map((i) => i.options), [5, 5, 5, 5, 5, null]);
+
+  const E = 3001;
+  await message(E, `/start ${t.code}`);
+  await message(E, "O'quvchi E");
+  const btns = sent.findLast((s) => s.payload.chat_id === E && s.payload.reply_markup).payload.reply_markup.inline_keyboard.flat().map((b) => b.text);
+  assert.deepEqual(btns, ['A', 'B', 'C', 'D', 'E', "⏭ O'tkazish"]);
+  await answerClosedByButtons(E, ['a', 'b', 'c', 'd', 'e']);
+  await message(E, 'toshkent');
+  assert.match(lastText(E), /Javoblaringizni tekshiring/);
+  assert.doesNotMatch(lastText(E), /Esse/);
+  await callback(E, 'sub:confirm');
+
+  await callback(ADMIN, `t:closeok:${t._id}`);
+  const sub = await models.Submission.findOne({ test: t._id, userId: E });
+  assert.equal(sub.rawScore, 6);
+  assert.equal(sub.essay, null);
+  assert.equal(sub.totalScore, sub.tScore, "essesiz testda umumiy ball — T-ball");
+  assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
 });

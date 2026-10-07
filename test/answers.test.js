@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   checkAnswers,
+  checkClosedRange,
+  parseEssay,
+  parseKeyForLabels,
+  parseStudentFixes,
   parseKeyFixes,
   isOpenCorrect,
   parseClosed,
@@ -117,4 +121,75 @@ test('kalitni tuzatish parseri', () => {
 test("xato matnlarida foydalanuvchi kiritgan < va & bo'lishi mumkin (HTML escape talab qilinadi)", () => {
   const err = parseClosed('1a 2b <3c', { expected: 3, allowSkip: true }).error;
   assert.ok(err.includes('<'), 'xato matni xom kiritmani o\'z ichiga oladi — botda escapeHtml shart');
+});
+
+test("tutuq belgisi: barcha ko'rinishlari va «tutuq belgisi» so'zi teng", () => {
+  const variants = ["'", '`', '‘', '’', 'ʻ', 'ʼ', '´', 'tutuq belgisi', 'Tutuq  belgisi', 'tutuq'];
+  for (const a of variants) for (const k of ["'", 'ʼ', 'tutuq belgisi']) assert.ok(isOpenCorrect(a, [k]), `${a} ~ ${k}`);
+  assert.ok(isOpenCorrect("o'zbek", ['o‘zbek']));
+  assert.ok(isOpenCorrect('ma`no', ['maʼno']));
+  assert.ok(isOpenCorrect("g'oya", ['gʻoya']));
+});
+
+test("tire: barcha ko'rinishlari va «tire» so'zi teng, «chiziqcha» so'zi emas", () => {
+  for (const a of ['-', '–', '—', '−', 'tire', 'TIRE']) for (const k of ['—', '-', 'tire']) assert.ok(isOpenCorrect(a, [k]), `${a} ~ ${k}`);
+  assert.ok(!isOpenCorrect('chiziqcha', ['tire']));
+});
+
+test("tinish belgilari so'z bilan va nuqtaning o'zi", () => {
+  assert.ok(isOpenCorrect('.', ['.']), "javobning o'zi nuqta bo'lsa bo'sh qolmasligi kerak");
+  assert.ok(isOpenCorrect('nuqta', ['.']));
+  assert.ok(isOpenCorrect('vergul', [',']));
+  assert.ok(isOpenCorrect('ikki nuqta', [':']));
+  assert.ok(isOpenCorrect("ko'p nuqta", ['...']));
+  assert.ok(isOpenCorrect('«', ["qo'shtirnoq"]));
+  assert.ok(!isOpenCorrect('vergul', ['.']));
+  assert.ok(isOpenCorrect('Toshkent.', ['toshkent']));
+});
+
+test('shablon kaliti: tartib bilan yoki raqami bilan, muqobillar ; bilan', () => {
+  const labels = ['36', '37', '40a', '40b'];
+  const plain = parseKeyForLabels("o'g'il;bola\n12\ntire\n-", labels);
+  assert.ok(plain.ok);
+  assert.deepEqual(plain.items[0], { label: '36', key: ["o'g'il", 'bola'] });
+  const labeled = parseKeyForLabels('40b=2\n36=a\n37=b\n40a=1', labels);
+  assert.deepEqual(labeled.items.map((i) => i.key[0]), ['a', 'b', '1', '2']);
+  assert.match(parseKeyForLabels('a\nb', labels).error, /4 ta javob/);
+  assert.match(parseKeyForLabels('36=a\n37=b\n40a=1', labels).error, /40b/);
+  assert.match(parseKeyForLabels('36=a\n37=b\n40a=1\n41=2', labels).error, /bunday savol yo'q/);
+});
+
+test('variantlar oralig\'i: 1–32 A–D, 33–35 A–F', () => {
+  const options = [...Array(32).fill(4), 6, 6, 6];
+  const ok = [...'abcd'.repeat(8), 'e', 'f', 'a'];
+  assert.equal(checkClosedRange(ok, options), null);
+  const bad = [...ok];
+  bad[3] = 'e';
+  assert.match(checkClosedRange(bad, options), /4-savolda faqat A–D/);
+  assert.equal(checkClosedRange(['', 'a'], [4, 4]), null, 'javobsiz savol xato emas');
+});
+
+test('esse bali: 0–75, vergul ham mumkin', () => {
+  assert.equal(parseEssay('58'), 58);
+  assert.equal(parseEssay('61,5'), 61.5);
+  assert.equal(parseEssay('0'), 0);
+  assert.equal(parseEssay('75'), 75);
+  for (const bad of ['76', '-1', 'abc', '', '5 ball']) assert.equal(parseEssay(bad), null, bad);
+});
+
+test("o'quvchi tasdiqlashdan oldin javobini tuzatadi", () => {
+  const items = [
+    { label: '1', kind: 'closed', options: 4 },
+    { label: '33', kind: 'closed', options: 6 },
+    { label: '36', kind: 'open' },
+    { label: '40a', kind: 'open' },
+  ];
+  const r = parseStudentFixes("1=C\n33=f\n36=o'g'il bola\n40a=-\nesse=61,5", items, { hasEssay: true });
+  assert.ok(r.ok);
+  assert.deepEqual([...r.fixes], [[0, 'c'], [1, 'f'], [2, "o'g'il bola"], [3, '']]);
+  assert.equal(r.essay, 61.5);
+  assert.deepEqual([...parseStudentFixes('1=x', items).fixes], [[0, '']], 'x — javobni olib tashlash');
+  assert.match(parseStudentFixes('1=e', items).error, /A–D/);
+  assert.match(parseStudentFixes('esse=60', items).error, /esse yo'q/);
+  assert.match(parseStudentFixes('99=a', items).error, /savoli yo'q/);
 });

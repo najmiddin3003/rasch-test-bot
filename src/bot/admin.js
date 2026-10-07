@@ -2,8 +2,9 @@ import { InlineKeyboard, InputFile } from 'grammy';
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { config } from '../config.js';
-import { parseClosed, parseKeyFixes, parseOpenKey } from '../lib/answers.js';
+import { checkClosedRange, parseClosed, parseKeyFixes, parseKeyForLabels, parseOpenKey } from '../lib/answers.js';
 import { escapeHtml, formatClosedBlock, formatOpenBlock } from '../lib/format.js';
+import { FORMATS, formatTitle, optionRange, optionsSummary } from '../lib/formats.js';
 import { buildExcelReport } from '../lib/report.js';
 import {
   closeTest,
@@ -16,7 +17,17 @@ import {
   reopenTest,
   simulateSubmissions,
 } from '../services/testService.js';
-import { BTN, cancelMenu, confirmKb, newTestConfirmKb, noClosedKb, noOpenKb, testCardKb } from './keyboards.js';
+import {
+  BTN,
+  cancelMenu,
+  confirmKb,
+  essayChoiceKb,
+  formatKb,
+  newTestConfirmKb,
+  noOpenKb,
+  optionsCountKb,
+  testCardKb,
+} from './keyboards.js';
 import { HTML, adminCloseSummary, fixKeyPrompt, keyText, studentResult, testSummary } from './texts.js';
 import { replyWithMenu, resetState, safeEdit, setState, sleep } from './helpers.js';
 
@@ -26,50 +37,95 @@ const MAX_OPEN = 60;
 const LIST_PAGE = 10;
 export const MAX_NOTIFY_ATTEMPTS = 3;
 
-const CLOSED_KEY_PROMPT =
-  '2️⃣ <b>Yopiq savollar kalitini</b> yuboring (A–F):\n' +
-  '<code>abcdabcdab...</code> yoki <code>1a2b3c4d...</code>\n\n' +
-  "Savollar soni kalit uzunligidan aniqlanadi. Yopiq savol bo'lmasa tugmani bosing.";
+// Yangi test yaratish holatlari (stateData: name, format, options, closedOptions, closedKey, openItems, hasEssay):
+//   nt_name → nt_format → [erkin: nt_options] → nt_closed → nt_open → [erkin: nt_essay] → nt_confirm
 
-function openKeyPrompt(closedCount) {
-  const next = closedCount + 1;
+const ANSWER_NOTE =
+  "• Tutuq belgisi (' ` ‘ ʼ) va tire (- – —) qanday yozilishidan qat'i nazar teng hisoblanadi, " +
+  '«tutuq belgisi» va «tire» so\'zlari ham.';
+
+function closedKeyPrompt(data) {
+  if (data.format === 'ona_tili') {
+    const n = data.closedOptions.length;
+    const pseudo = data.closedOptions.map((o, i) => ({ label: String(i + 1), kind: 'closed', options: o }));
+    return (
+      `2️⃣ <b>Yopiq savollar kaliti</b> — ${n} ta harf (${optionsSummary(pseudo)}):\n` +
+      '<code>abcdabcd...</code> yoki <code>1a2b3c4d...</code>'
+    );
+  }
   return (
-    `3️⃣ <b>Ochiq savollar kalitini</b> yuboring — har qatorda bitta savol:\n` +
+    `2️⃣ <b>Yopiq savollar kalitini</b> yuboring (${optionRange(data.options)}):\n` +
+    '<code>abcdabcdab...</code> yoki <code>1a2b3c4d...</code>\n\n' +
+    'Savollar soni kalit uzunligidan aniqlanadi.'
+  );
+}
+
+function openKeyPrompt(data) {
+  if (data.format === 'ona_tili') {
+    const labels = FORMATS.ona_tili.openLabels;
+    return (
+      `3️⃣ <b>Yozma savollar kaliti</b> — ${labels.length} ta javob, har qatorda bittadan, tartib bilan:\n` +
+      `<code>${labels.join(', ')}</code>\n\n` +
+      'Yoki raqami bilan: <code>36=javob</code>, <code>40a=javob</code>\n' +
+      "• Bir nechta to'g'ri javob bo'lsa <code>;</code> bilan ajrating: <code>37=o'g'il;bola</code>\n" +
+      ANSWER_NOTE
+    );
+  }
+  const next = data.closedKey.length + 1;
+  return (
+    `3️⃣ <b>Yozma savollar kalitini</b> yuboring — har qatorda bitta savol:\n` +
     `<code>${next}a=12\n${next}b=-3\n${next + 1}=0.5;1/2</code>\n\n` +
     `• Bir nechta to'g'ri javob bo'lsa <code>;</code> bilan ajrating.\n` +
     `• Raqamsiz yozsangiz (faqat javoblar), ${next} dan boshlab raqamlanadi.\n` +
-    `• Sonlar qiymati bo'yicha solishtiriladi: 0.5 = 1/2 = 0,5.\n\n` +
-    "Ochiq savol bo'lmasa tugmani bosing."
+    `• Sonlar qiymati bo'yicha solishtiriladi: 0.5 = 1/2 = 0,5.\n` +
+    `${ANSWER_NOTE}\n\n` +
+    "Yozma savol bo'lmasa tugmani bosing."
   );
 }
 
 function newTestPreview(data) {
   const closed = data.closedKey || [];
   const open = data.openItems || [];
+  const pseudo = closed.map((k, i) => ({ label: String(i + 1), kind: 'closed', options: data.closedOptions[i] }));
   let text = `📋 <b>Yangi test</b>: ${escapeHtml(data.name)}\n`;
-  text += `Jami savollar: <b>${closed.length + open.length}</b> (yopiq ${closed.length}, ochiq ${open.length})\n`;
-  if (closed.length) text += `\n<b>Yopiq kalit:</b>\n${formatClosedBlock(closed)}\n`;
+  text += `📘 Format: ${formatTitle(data.format)}\n`;
+  text += `Jami savollar: <b>${closed.length + open.length}</b> (yopiq ${closed.length}, yozma ${open.length})`;
+  text += data.hasEssay ? ' + esse\n' : '\n';
+  if (closed.length) text += `\n<b>Yopiq kalit</b> — ${optionsSummary(pseudo)}:\n${formatClosedBlock(closed)}\n`;
   if (open.length) {
-    text += `\n<b>Ochiq kalit:</b>\n${formatOpenBlock(
+    text += `\n<b>Yozma kalit:</b>\n${formatOpenBlock(
       open.map((o) => o.label),
       open.map((o) => o.key.join(' ; ')),
     )}\n`;
   }
+  text += `\n<b>Esse:</b> ${data.hasEssay ? "bor — o'quvchi oxirida esse balini (0–75) kiritadi" : "yo'q"}\n`;
   return text + '\nSaqlaysizmi?';
 }
 
-async function goToOpenStep(ctx, closedKey) {
-  await setState(ctx, 'nt_open', { ...ctx.user.stateData, closedKey });
-  return ctx.reply(openKeyPrompt(closedKey.length), { ...HTML, reply_markup: noOpenKb });
+async function goToClosedStep(ctx, data) {
+  await setState(ctx, 'nt_closed', data);
+  return ctx.reply(closedKeyPrompt(data), HTML);
 }
 
-async function goToConfirm(ctx, openItems) {
-  const data = { ...ctx.user.stateData, openItems };
-  if (!data.closedKey.length && !openItems.length) {
-    await setState(ctx, 'nt_closed', { name: data.name });
-    return ctx.reply('❗ Testda kamida bitta savol bo\'lishi kerak.\n\n' + CLOSED_KEY_PROMPT, {
+async function goToOpenStep(ctx, data) {
+  await setState(ctx, 'nt_open', data);
+  return ctx.reply(openKeyPrompt(data), { ...HTML, reply_markup: data.format === 'ona_tili' ? undefined : noOpenKb });
+}
+
+/** Erkin formatda — esse bor-yo'qligini so'rash; shablonda esse har doim bor */
+async function goToEssayStep(ctx, data) {
+  if (data.format === 'ona_tili') return goToConfirm(ctx, { ...data, hasEssay: true });
+  await setState(ctx, 'nt_essay', data);
+  return ctx.reply("4️⃣ Testda <b>esse</b> bormi? Bo'lsa, o'quvchi oxirida esse balini (0–75) kiritadi va " +
+    'umumiy ball = (test bali + esse bali) / 2 bo\'ladi.', { ...HTML, reply_markup: essayChoiceKb });
+}
+
+async function goToConfirm(ctx, data) {
+  if (!data.closedKey.length && !data.openItems.length) {
+    await setState(ctx, 'nt_options', { name: data.name, format: data.format });
+    return ctx.reply("❗ Testda kamida bitta savol bo'lishi kerak.\n\nYopiq savollar nechta variantli?", {
       ...HTML,
-      reply_markup: noClosedKb,
+      reply_markup: optionsCountKb,
     });
   }
   await setState(ctx, 'nt_confirm', data);
@@ -78,7 +134,7 @@ async function goToConfirm(ctx, openItems) {
 
 export async function startNewTest(ctx) {
   await setState(ctx, 'nt_name');
-  return ctx.reply('1️⃣ Test <b>nomini</b> kiriting (masalan: <i>Matematika — 05.10 sinov</i>):', {
+  return ctx.reply('1️⃣ Test <b>nomini</b> kiriting (masalan: <i>Ona tili — 07.10 sinov</i>):', {
     ...HTML,
     reply_markup: cancelMenu,
   });
@@ -92,6 +148,7 @@ export async function handleAdminText(ctx, text) {
     await resetState(ctx);
     return false;
   }
+  const data = { ...ctx.user.stateData };
 
   if (state === 'nt_name') {
     const name = text.trim();
@@ -99,13 +156,19 @@ export async function handleAdminText(ctx, text) {
       await ctx.reply('❗ Nom 2–100 belgidan iborat bo\'lsin.');
       return true;
     }
-    await setState(ctx, 'nt_closed', { name });
-    await ctx.reply(CLOSED_KEY_PROMPT, { ...HTML, reply_markup: noClosedKb });
+    await setState(ctx, 'nt_format', { name });
+    await ctx.reply('Test <b>formatini</b> tanlang:', { ...HTML, reply_markup: formatKb });
+    return true;
+  }
+
+  if (state === 'nt_format' || state === 'nt_options' || state === 'nt_essay' || state === 'nt_confirm') {
+    await ctx.reply('Yuqoridagi tugmalardan birini bosing (yoki «❌ Bekor qilish»).');
     return true;
   }
 
   if (state === 'nt_closed') {
-    const parsed = parseClosed(text);
+    const template = data.format === 'ona_tili';
+    const parsed = parseClosed(text, template ? { expected: data.closedOptions.length } : {});
     if (!parsed.ok) {
       await ctx.reply(`❗ ${escapeHtml(parsed.error)}\n\nQayta yuboring.`, HTML);
       return true;
@@ -114,26 +177,30 @@ export async function handleAdminText(ctx, text) {
       await ctx.reply(`❗ Yopiq savollar ko'pi bilan ${MAX_CLOSED} ta bo'lishi mumkin (siz ${parsed.answers.length} ta yubordingiz).`);
       return true;
     }
-    await goToOpenStep(ctx, parsed.answers);
+    const closedOptions = template ? data.closedOptions : parsed.answers.map(() => data.options);
+    const rangeError = checkClosedRange(parsed.answers, closedOptions);
+    if (rangeError) {
+      await ctx.reply(`❗ ${escapeHtml(rangeError)}\n\nQayta yuboring.`, HTML);
+      return true;
+    }
+    await goToOpenStep(ctx, { ...data, closedKey: parsed.answers, closedOptions });
     return true;
   }
 
   if (state === 'nt_open') {
-    const parsed = parseOpenKey(text, ctx.user.stateData.closedKey.length);
+    const parsed =
+      data.format === 'ona_tili'
+        ? parseKeyForLabels(text, FORMATS.ona_tili.openLabels)
+        : parseOpenKey(text, data.closedKey.length);
     if (!parsed.ok) {
       await ctx.reply(`❗ ${escapeHtml(parsed.error)}\n\nQayta yuboring.`, HTML);
       return true;
     }
     if (parsed.items.length > MAX_OPEN) {
-      await ctx.reply(`❗ Ochiq savollar ko'pi bilan ${MAX_OPEN} ta bo'lishi mumkin.`);
+      await ctx.reply(`❗ Yozma savollar ko'pi bilan ${MAX_OPEN} ta bo'lishi mumkin.`);
       return true;
     }
-    await goToConfirm(ctx, parsed.items);
-    return true;
-  }
-
-  if (state === 'nt_confirm') {
-    await ctx.reply('Yuqoridagi «✅ Saqlash» yoki «❌ Bekor qilish» tugmasini bosing.');
+    await goToEssayStep(ctx, { ...data, openItems: parsed.items });
     return true;
   }
 
@@ -254,25 +321,57 @@ export function registerAdmin(bot) {
     return ctx.reply("⛔ Bu bo'lim faqat adminlar uchun.");
   };
 
+  /** Yangi test bosqichidagi tugma: holat mos bo'lsa — tugmalarni olib, davom ettiradi */
+  const step = (expectedStates, handler) => async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!expectedStates.includes(ctx.user.state)) return;
+    await ctx.editMessageReplyMarkup().catch(() => {});
+    return handler(ctx, { ...ctx.user.stateData });
+  };
+
   bot.hears(BTN.newTest, adminOnly, startNewTest);
   bot.hears(BTN.tests, adminOnly, async (ctx) => {
     await resetState(ctx);
     return showTestList(ctx);
   });
 
-  bot.callbackQuery('nt:noclosed', adminOnly, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    if (ctx.user.state !== 'nt_closed') return;
-    await ctx.editMessageReplyMarkup().catch(() => {});
-    return goToOpenStep(ctx, []);
-  });
+  bot.callbackQuery(
+    /^nt:fmt:(ona_tili|free)$/,
+    adminOnly,
+    step(['nt_format'], (ctx, data) => {
+      if (ctx.match[1] === 'ona_tili') {
+        const f = FORMATS.ona_tili;
+        return goToClosedStep(ctx, { name: data.name, format: 'ona_tili', closedOptions: f.closedOptions, hasEssay: true });
+      }
+      return setState(ctx, 'nt_options', { name: data.name, format: 'free' }).then(() =>
+        ctx.reply('Yopiq savollar nechta variantli?', { reply_markup: optionsCountKb }),
+      );
+    }),
+  );
 
-  bot.callbackQuery('nt:noopen', adminOnly, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    if (ctx.user.state !== 'nt_open') return;
-    await ctx.editMessageReplyMarkup().catch(() => {});
-    return goToConfirm(ctx, []);
-  });
+  bot.callbackQuery(
+    /^nt:opt:([4-6])$/,
+    adminOnly,
+    step(['nt_options'], (ctx, data) => goToClosedStep(ctx, { ...data, options: Number(ctx.match[1]) })),
+  );
+
+  bot.callbackQuery(
+    'nt:noclosed',
+    adminOnly,
+    step(['nt_options', 'nt_closed'], (ctx, data) => goToOpenStep(ctx, { ...data, closedKey: [], closedOptions: [] })),
+  );
+
+  bot.callbackQuery(
+    'nt:noopen',
+    adminOnly,
+    step(['nt_open'], (ctx, data) => goToEssayStep(ctx, { ...data, openItems: [] })),
+  );
+
+  bot.callbackQuery(
+    /^nt:essay:([01])$/,
+    adminOnly,
+    step(['nt_essay'], (ctx, data) => goToConfirm(ctx, { ...data, hasEssay: ctx.match[1] === '1' })),
+  );
 
   bot.callbackQuery('nt:cancel', adminOnly, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -283,8 +382,8 @@ export function registerAdmin(bot) {
 
   bot.callbackQuery('nt:save', adminOnly, async (ctx) => {
     if (ctx.user.state !== 'nt_confirm') return ctx.answerCallbackQuery({ text: "Bu so'rov eskirgan." });
-    const { name, closedKey, openItems } = ctx.user.stateData;
-    const test = await createTest({ name, createdBy: ctx.from.id, closedKey, openItems });
+    const { name, closedKey, closedOptions, openItems, format, hasEssay } = ctx.user.stateData;
+    const test = await createTest({ name, createdBy: ctx.from.id, closedKey, closedOptions, openItems, format, hasEssay });
     await resetState(ctx);
     await ctx.answerCallbackQuery({ text: 'Saqlandi ✅' });
     await ctx.editMessageReplyMarkup().catch(() => {});

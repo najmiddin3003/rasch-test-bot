@@ -244,3 +244,27 @@ test("o'rinlar: tenglarga bir xil o'rin", () => {
   const ranks = res.persons.map((p) => p.rank);
   assert.deepEqual(ranks, [1, 2, 2, 4]);
 });
+
+test('esse: umumiy ball = (test + esse) / 2, daraja va o\'rin umumiy ball bo\'yicha', () => {
+  const m = [
+    [1, 1, 1, 0],
+    [1, 1, 0, 0],
+    [1, 0, 0, 0],
+    [0, 0, 0, 0],
+    [1, 1, 1, 1],
+  ];
+  const essays = [60, 70, 40, 0, 75];
+  const r = computeResults(m, { essays });
+  for (const p of r.persons) {
+    assert.equal(p.essay, essays[p.index]);
+    assert.ok(Math.abs(p.total - (p.tScore + p.essay) / 2) <= 0.05 + 1e-9);
+    assert.equal(p.grade, gradeFor(p.total));
+  }
+  // 2 ta to'g'ri + esse 70 → 3 ta to'g'ri + esse 60 dan yuqori turadi
+  const byIdx = Object.fromEntries(r.persons.map((p) => [p.index, p]));
+  assert.ok(byIdx[1].total > byIdx[0].total);
+  assert.ok(byIdx[1].rank < byIdx[0].rank);
+  // Esse yo'q testda umumiy ball — T-ball
+  const plain = computeResults(m);
+  assert.ok(plain.persons.every((p) => p.total === p.tScore && p.essay === null));
+});

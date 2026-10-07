@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { formatDate } from './format.js';
+import { formatTitle, optionRange } from './formats.js';
 
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
 const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -54,7 +55,13 @@ export async function buildExcelReport(test, submissions) {
     { header: 'Foiz', key: 'percent', width: 8 },
     { header: 'θ (logit)', key: 'theta', width: 10 },
     { header: 'SE', key: 'se', width: 8 },
-    { header: 'T-ball', key: 'tScore', width: 9 },
+    { header: test.hasEssay ? 'Test bali (T)' : 'T-ball', key: 'tScore', width: 9 },
+    ...(test.hasEssay
+      ? [
+          { header: 'Esse', key: 'essay', width: 8 },
+          { header: 'Umumiy ball', key: 'totalScore', width: 10 },
+        ]
+      : []),
     { header: 'Daraja', key: 'grade', width: 9 },
     { header: 'Infit', key: 'infit', width: 7 },
     { header: 'Outfit', key: 'outfit', width: 7 },
@@ -71,6 +78,8 @@ export async function buildExcelReport(test, submissions) {
       theta: s.theta,
       se: s.se,
       tScore: s.tScore,
+      essay: s.essaySkipped ? '0 (kiritilmagan)' : s.essay,
+      totalScore: s.totalScore,
       grade: s.grade || "O'tmadi",
       infit: s.infit,
       outfit: s.outfit,
@@ -83,7 +92,7 @@ export async function buildExcelReport(test, submissions) {
   const itemsSheet = wb.addWorksheet('Savollar');
   itemsSheet.columns = [
     { header: 'Savol', key: 'label', width: 8 },
-    { header: 'Turi', key: 'kind', width: 9 },
+    { header: 'Turi', key: 'kind', width: 12 },
     { header: 'Kalit', key: 'key', width: 16 },
     { header: "To'g'ri yechganlar", key: 'correct', width: 12 },
     { header: 'Foiz', key: 'percent', width: 8 },
@@ -98,7 +107,7 @@ export async function buildExcelReport(test, submissions) {
   for (const item of test.items) {
     const row = itemsSheet.addRow({
       label: item.label,
-      kind: item.kind === 'closed' ? 'yopiq' : 'ochiq',
+      kind: item.kind === 'closed' ? `yopiq (${optionRange(item.options || 4)})` : 'yozma',
       key: item.kind === 'closed' ? item.key[0].toUpperCase() : item.key.join(' ; '),
       correct: item.correctCount,
       percent: n ? Math.round((item.correctCount / n) * 1000) / 10 : 0,
@@ -145,7 +154,9 @@ export async function buildExcelReport(test, submissions) {
   info.addRows([
     { k: 'Test nomi', v: test.name },
     { k: 'Kod', v: test.code },
+    { k: 'Format', v: formatTitle(test.format) },
     { k: 'Savollar soni', v: total },
+    { k: 'Esse', v: test.hasEssay ? "bor — umumiy ball = (test bali + esse bali) / 2" : "yo'q" },
     { k: 'Qatnashchilar', v: n },
     { k: 'Yopilgan vaqti', v: formatDate(test.closedAt) },
     { k: 'O‘rtacha θ', v: test.stats?.meanTheta },
