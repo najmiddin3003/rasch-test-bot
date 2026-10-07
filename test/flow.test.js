@@ -276,7 +276,12 @@ test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, y
     })(),
     (async () => {
       await answerClosedByButtons(D, CLOSED_KEY.map((l, i) => (i % 2 ? wrongOf(l) : l)));
-      await answerOpen(D, 35, ['xato', 'tire', 'xato', 'xato', 'ot', 'xato', 'xato', 'xato', '7', 'xato', 'xato', 'xato', 'xato', 'xato']);
+      // Yozma javoblar bitta xabarda bir nechta qator: har biri navbatdagi savolga (37= belgisi olib tashlanadi)
+      await message(D, 'xato\n' + 'a\n'.repeat(20));
+      assert.match(lastText(D), /21 ta qator bor, lekin 14 ta yozma savol qoldi/);
+      await message(D, 'xato\n37=tire\nxato');
+      assert.match(lastText(D), /39-savol<\/b> — javobingizni yozing/);
+      await answerOpen(D, 38, ['xato', 'ot', 'xato', 'xato', 'xato', '7', 'xato', 'xato', 'xato', 'xato', 'xato']);
       await message(D, '0');
       await callback(D, 'sub:confirm');
     })(),
@@ -304,6 +309,8 @@ test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, y
   const subD = await models.Submission.findOne({ test: created._id, userId: D });
   assert.equal(subD.essay, 0);
   assert.equal(subD.essaySkipped, false);
+  assert.deepEqual(subD.answers.slice(35, 39), ['xato', 'tire', 'xato', 'xato'], "ko'p qatorli xabar savollarga bo'linadi");
+  assert.equal(subD.correct[36], 1, '37: tire');
 
   // Takroriy urinish rad etiladi
   await message(A, code);

@@ -169,6 +169,51 @@ async function handleBulkClosed(ctx, test, data, text) {
   await showNext(ctx, test, data);
 }
 
+/** "37=javob" yoki "37) javob" — qator boshidagi raqam aynan shu savolniki bo'lsa, olib tashlanadi */
+function stripOwnLabel(line, label) {
+  const m = line.match(/^(\d+)\s*([a-zа-я]?)\s*[=)]\s*(.*)$/i);
+  if (!m) return line;
+  const lineLabel = `${m[1]}${m[2]}`.toLowerCase().replace('а', 'a').replace('б', 'b');
+  return lineLabel === label ? m[3].trim() : line;
+}
+
+/**
+ * Yozma savolga javob. Bir xabarda bir nechta qator bo'lsa — har bir qator navbatdagi
+ * savolning javobi (o'quvchilar ko'pincha hammasini bitta xabarda yuboradi).
+ */
+async function handleOpenText(ctx, test, data, text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const remaining = test.items.slice(data.pos).filter((i) => i.kind === 'open');
+  if (!lines.length) {
+    await ctx.reply("❗ Javob bo'sh. Javobni yozing yoki «⏭ O'tkazish» ni bosing.");
+    return;
+  }
+  if (lines.length > remaining.length) {
+    await ctx.reply(
+      `❗ Xabarda ${lines.length} ta qator bor, lekin ${remaining.length} ta yozma savol qoldi ` +
+        `(${remaining[0].label}–${remaining.at(-1).label}). Har bir javobni alohida yuboring ` +
+        "yoki qatorlar sonini to'g'rilang.",
+    );
+    return;
+  }
+  const answers = lines.map((line, k) => stripOwnLabel(line, remaining[k].label));
+  const tooLong = answers.findIndex((a) => a.length > MAX_OPEN_ANSWER);
+  if (tooLong >= 0) {
+    await ctx.reply(`❗ ${remaining[tooLong].label}-savol javobi juda uzun (${MAX_OPEN_ANSWER} belgigacha). Qisqaroq yozing.`);
+    return;
+  }
+  answers.forEach((a, k) => {
+    data.answers[test.items.indexOf(remaining[k])] = a;
+  });
+  const shown = answers.map((a, k) => openAnsweredText(remaining[k], a.length > 60 ? `${a.slice(0, 59)}…` : a));
+  await editById(ctx, data.msgId, withNote(data, shown.join('\n')));
+  data.pos = test.items.indexOf(remaining[answers.length - 1]) + 1;
+  await showNext(ctx, test, data);
+}
+
 /** Holatga qarab o'quvchi matnini qayta ishlash. true — xabar qayta ishlandi */
 export async function handleStudentText(ctx, text) {
   const state = ctx.user.state;
@@ -183,15 +228,7 @@ export async function handleStudentText(ctx, text) {
       return true;
     }
     if (item?.kind === 'open') {
-      const answer = text.trim();
-      if (answer.length > MAX_OPEN_ANSWER) {
-        await ctx.reply(`❗ Javob juda uzun (${MAX_OPEN_ANSWER} belgigacha). Qisqaroq yozing.`);
-        return true;
-      }
-      data.answers[data.pos] = answer;
-      await editById(ctx, data.msgId, withNote(data, openAnsweredText(item, answer)));
-      data.pos += 1;
-      await showNext(ctx, test, data);
+      await handleOpenText(ctx, test, data, text);
       return true;
     }
     await showNext(ctx, test, data);

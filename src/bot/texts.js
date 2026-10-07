@@ -19,7 +19,8 @@ export function help(isAdmin) {
     "1. O'qituvchidan test kodini oling va botga yuboring.\n" +
     "2. Yopiq savollarda javobni tugma bilan tanlang — keyingi savol shu xabarning o'zida chiqadi. " +
     "Bilmasangiz «⏭ O'tkazish».\n" +
-    "3. Yozma savollarni bot bittalab so'raydi — javobni yozib yuboring yoki «⏭ O'tkazish» ni bosing.\n" +
+    "3. Yozma savollarni bot bittalab so'raydi — javobni yozib yuboring yoki «⏭ O'tkazish» ni bosing. " +
+    "Bir nechta javobni bitta xabarda, har birini yangi qatorda yuborsangiz ham bo'ladi.\n" +
     `4. Esseli testda oxirida esse balingizni (0–${ESSAY_MAX}) kiritasiz.\n` +
     '5. Oxirida javoblaringizni tekshirib tasdiqlaysiz. Xatoni tuzatish uchun <code>12=b</code>, ' +
     '<code>37=javob</code> yoki <code>esse=60</code> deb yozing.\n' +
