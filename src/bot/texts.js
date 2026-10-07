@@ -68,21 +68,39 @@ export function testSummary(test, participants, botUsername) {
   );
 }
 
+export const MAX_MESSAGE = 4096;
+
+const shorten = (s, limit) => (s.length > limit ? `${s.slice(0, Math.max(1, limit - 1))}…` : s);
+
+/**
+ * head + yozma javoblar/kalitlar bloki + tail. Telegram chegarasidan (4096) oshsa, har bir
+ * qiymat sig'maguncha qisqartiriladi (to'liq ko'rinish — Excel faylda).
+ */
+export function fitOpenBlock(head, title, labels, values, tail = '') {
+  const block = (limit) => `${title}\n${formatOpenBlock(labels, values.map((v) => shorten(v || '', limit)))}\n`;
+  for (let limit = 300; limit > 1; limit = Math.floor(limit * 0.8)) {
+    const text = head + block(limit) + tail;
+    if (text.length <= MAX_MESSAGE) return text;
+  }
+  return head + block(1) + tail;
+}
+
 export function keyText(test) {
   const closed = test.items.filter((i) => i.kind === 'closed');
   const open = test.items.filter((i) => i.kind === 'open');
-  let text = `🔑 <b>${escapeHtml(test.name)}</b> kaliti\n`;
+  let head = `🔑 <b>${escapeHtml(test.name)}</b> kaliti\n`;
   if (closed.length) {
-    text += `\n<b>Yopiq (${closed.length})</b> — ${optionsSummary(test.items)}:\n${formatClosedBlock(closed.map((i) => i.key[0]))}\n`;
+    head += `\n<b>Yopiq (${closed.length})</b> — ${optionsSummary(test.items)}:\n${formatClosedBlock(closed.map((i) => i.key[0]))}\n`;
   }
-  if (open.length) {
-    text += `\n<b>Yozma (${open.length}):</b>\n${formatOpenBlock(
-      open.map((i) => i.label),
-      open.map((i) => i.key.join(' ; ')),
-    )}\n`;
-  }
-  if (test.hasEssay) text += `\n<b>Esse:</b> o'quvchi balni o'zi kiritadi (0–${ESSAY_MAX})`;
-  return text;
+  const tail = test.hasEssay ? `\n<b>Esse:</b> o'quvchi balni o'zi kiritadi (0–${ESSAY_MAX})` : '';
+  if (!open.length) return head + tail;
+  return fitOpenBlock(
+    head,
+    `\n<b>Yozma (${open.length}):</b>`,
+    open.map((i) => i.label),
+    open.map((i) => i.key.join(' ; ')),
+    tail,
+  );
 }
 
 /** Javob berishni boshlashdan oldingi ma'lumot */
@@ -159,8 +177,6 @@ function essayLine(essay, skipped) {
 /**
  * @param {{ essay?: number|null, essaySkipped?: boolean }} essayInfo
  */
-const MAX_MESSAGE = 4096;
-
 export function submissionPreview(test, answers, { essay = null, essaySkipped = false } = {}) {
   const closedItems = test.items.filter((i) => i.kind === 'closed');
   const openItems = test.items.filter((i) => i.kind === 'open');
@@ -181,20 +197,13 @@ export function submissionPreview(test, answers, { essay = null, essaySkipped = 
     "Tasdiqlagandan keyin o'zgartirib bo'lmaydi.";
 
   if (!openItems.length) return head + tail;
-  // Uzun yozma javoblar qisqartiriladi — xabar Telegram chegarasidan (4096) oshmaguncha
-  const openBlock = (limit) =>
-    `\n<b>Yozma (${openItems.length}):</b>\n${formatOpenBlock(
-      openItems.map((i) => i.label),
-      openItems.map((it) => {
-        const a = answers[test.items.indexOf(it)] || '';
-        return a.length > limit ? `${a.slice(0, Math.max(1, limit - 1))}…` : a;
-      }),
-    )}\n`;
-  for (let limit = 100; limit > 1; limit = Math.floor(limit * 0.8)) {
-    const text = head + openBlock(limit) + tail;
-    if (text.length <= MAX_MESSAGE) return text;
-  }
-  return head + openBlock(1) + tail;
+  return fitOpenBlock(
+    head,
+    `\n<b>Yozma (${openItems.length}):</b>`,
+    openItems.map((i) => i.label),
+    openItems.map((it) => answers[test.items.indexOf(it)] || ''),
+    tail,
+  );
 }
 
 export function studentResult(test, submission) {
@@ -231,15 +240,25 @@ const METHOD_NAMES = {
   none: '—',
 };
 
-export function flaggedItemsText(test) {
+/** Shubhali savollar ro'yxati (ko'pi bilan maxLines ta; kalitlar qisqartiriladi — to'liq Excel'da) */
+export function flaggedItemsText(test, maxLines = 15) {
   const flagged = test.items.filter((i) => i.flag);
   if (!flagged.length) return '';
-  const lines = flagged.slice(0, 15).map((i) => {
-    const key = i.kind === 'closed' ? i.key[0].toUpperCase() : i.key.join(' ; ');
+  const lines = flagged.slice(0, maxLines).map((i) => {
+    const key = i.kind === 'closed' ? i.key[0].toUpperCase() : shorten(i.key.join(' ; '), 40);
     return `• <b>${i.label}</b> (kalit: ${escapeHtml(key)}, to'g'ri: ${i.correctCount}) — ${escapeHtml(i.flag)}`;
   });
-  if (flagged.length > 15) lines.push(`... yana ${flagged.length - 15} ta (Excel faylda)`);
-  return `\n\n⚠️ <b>Tekshirish kerak bo'lgan savollar:</b>\n${lines.join('\n')}`;
+  if (flagged.length > maxLines) lines.push(`... yana ${flagged.length - maxLines} ta (Excel faylda)`);
+  return `\n\n⚠️ <b>Tekshirish kerak bo'lgan savollar (${flagged.length}):</b>\n${lines.join('\n')}`;
+}
+
+/** head + shubhali savollar + tail — 4096 ga sig'maguncha ro'yxat qisqaradi */
+function withFlagged(test, head, tail) {
+  for (const maxLines of [15, 8, 4, 0]) {
+    const text = head + flaggedItemsText(test, maxLines) + tail;
+    if (text.length <= MAX_MESSAGE) return text;
+  }
+  return head + flaggedItemsText(test, 0) + tail;
 }
 
 export function adminCloseSummary(test, submissions) {
@@ -276,31 +295,32 @@ export function adminCloseSummary(test, submissions) {
   if (st.reliability !== null && st.reliability !== undefined) {
     text += `\n📐 Ishonchlilik: ${st.reliability.toFixed(2)} (Rasch), KR-20: ${st.kr20 === null ? '—' : st.kr20.toFixed(2)}`;
   }
-  text += flaggedItemsText(test);
+  let tail = '';
   if (n < 30) {
-    text += `\n\n⚠️ Qatnashchilar soni kam (${n} &lt; 30) — Rasch baholari aniqligi past bo'lishi mumkin.`;
+    tail += `\n\n⚠️ Qatnashchilar soni kam (${n} &lt; 30) — Rasch baholari aniqligi past bo'lishi mumkin.`;
   }
   if (st.converged === false) {
-    text += '\n⚠️ Rasch hisobi to\'liq yaqinlashmadi — natijalarni ehtiyotkorlik bilan baholang.';
+    tail += '\n⚠️ Rasch hisobi to\'liq yaqinlashmadi — natijalarni ehtiyotkorlik bilan baholang.';
   }
   if (st.method === 'CML+prior') {
-    text += "\nℹ️ Javoblar to'liq «zinapoya» shaklida (Guttman) — aniq CML yechimi yo'q, zaif prior ishlatildi.";
+    tail += "\nℹ️ Javoblar to'liq «zinapoya» shaklida (Guttman) — aniq CML yechimi yo'q, zaif prior ishlatildi.";
   }
   if (!test.publishedAt) {
-    text +=
+    tail +=
       '\n\n❗ Natijalar hali qatnashchilarga <b>yuborilmadi</b>. Tekshirib chiqing: kalit xato bo\'lsa ' +
       '«✏️ Kalitni tuzatish», hammasi to\'g\'ri bo\'lsa «📤 Natijalarni yuborish» ni bosing.';
   }
-  return text;
+  return withFlagged(test, text, tail);
 }
 
 export function fixKeyPrompt(test) {
-  return (
+  return withFlagged(
+    test,
     '✏️ <b>Kalitni tuzatish</b>\n\n' +
-    'Tuzatiladigan savollarni yuboring — har qatorda bitta:\n' +
-    '<code>7=c\n37=javob;muqobil javob</code>\n\n' +
-    "Barcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi." +
-    flaggedItemsText(test)
+      'Tuzatiladigan savollarni yuboring — har qatorda bitta:\n' +
+      '<code>7=c\n37=javob;muqobil javob</code>\n\n' +
+      "Barcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi.",
+    '',
   );
 }
 

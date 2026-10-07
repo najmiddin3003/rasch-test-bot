@@ -114,3 +114,28 @@ test("natija xabari: esseli testda test bali, esse va umumiy ball ko'rsatiladi",
   const skipped = studentResult(t, { ...sub, essay: 0, essaySkipped: true, totalScore: 31.2, grade: null });
   assert.match(skipped, /Esse bali: <b>0 \(kiritilmagan\)<\/b>/);
 });
+
+test("uzun kalitlar va ko'p ogohlantirish ham 4096 belgiga sig'adi", () => {
+  const long = 'juda uzun javob '.repeat(12);
+  const t = {
+    name: evil,
+    code: '1',
+    hasEssay: true,
+    items: Array.from({ length: 60 }, (_, i) => ({
+      label: String(151 + i),
+      kind: 'open',
+      key: [long, long, '<&>'],
+      correctCount: 0,
+      flag: "Hech kim to'g'ri topmagan — kalitni tekshiring (yoki savol juda qiyin)",
+    })),
+    status: 'closed',
+    publishedAt: null,
+    stats: { participants: 40, method: 'CML', reliability: 0.8, kr20: 0.8 },
+  };
+  const subs = [{ rank: 1, fullName: evil, tScore: 50, totalScore: 50, essay: 50, rawScore: 1, grade: 'C+', correct: [] }];
+  assertTelegramHtml(keyText(t), 'kalit');
+  assertTelegramHtml(adminCloseSummary(t, subs), 'xulosa');
+  assertTelegramHtml(fixKeyPrompt(t), 'tuzatish');
+  assertTelegramHtml(submissionPreview(t, t.items.map(() => long + long), { essay: 50 }), "ko'rib chiqish");
+  assert.match(adminCloseSummary(t, subs), /Tekshirish kerak bo'lgan savollar \(60\)/);
+});

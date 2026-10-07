@@ -1,8 +1,20 @@
 // Kalit va javoblarni o'qish (parse) hamda tekshirish.
-import { ESSAY_MAX, optionLetters, optionRange } from './formats.js';
+import { ESSAY_MAX, itemOptions, optionLetters, optionRange } from './formats.js';
 
-// Yozma javobning maksimal uzunligi (ona tili javoblari — so'z yoki qisqa ibora)
-export const MAX_OPEN_ANSWER = 100;
+// Yozma javobning maksimal uzunligi (so'z, ibora yoki gap)
+export const MAX_OPEN_ANSWER = 300;
+
+/**
+ * Kalitdagi muqobil javoblar ";" bilan ajratiladi. Javobning o'zi nuqtali vergul bo'lsa
+ * (masalan, tinish belgisi so'ralgan savol), qatorga faqat ";" yoziladi.
+ */
+function splitKeys(rhs) {
+  if (String(rhs).trim() === ';') return [';'];
+  return String(rhs)
+    .split(';')
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
 
 // Kirill klaviaturada terilgan, lotinga o'xshash harflar
 const LOOKALIKES = {
@@ -175,10 +187,7 @@ export function parseOpenKey(text, closedCount) {
     const m = labeled[idx];
     const label = m ? normalizeLabel(m[1]) : String(closedCount + idx + 1);
     const rhs = m ? m[2] : lines[idx];
-    const keys = rhs
-      .split(';')
-      .map((k) => k.trim())
-      .filter(Boolean);
+    const keys = splitKeys(rhs);
     if (!keys.length) return { ok: false, error: `${label}-savol uchun javob yozilmagan.` };
     if (seen.has(label)) return { ok: false, error: `${label}-savol ikki marta yozilgan.` };
     if (parseInt(label, 10) <= closedCount) {
@@ -254,10 +263,7 @@ export function parseKeyFixes(text, items) {
       }
       fixes.set(label, [letter]);
     } else {
-      const keys = m[2]
-        .split(';')
-        .map((k) => k.trim())
-        .filter(Boolean);
+      const keys = splitKeys(m[2]);
       if (!keys.length) return { ok: false, error: `${label}-savol uchun javob yozilmagan.` };
       fixes.set(label, keys);
     }
@@ -291,11 +297,7 @@ export function parseKeyForLabels(text, labels) {
   if (!lines.length) return { ok: false, error: "Kalit bo'sh." };
   const labeled = lines.map((l) => l.match(LABELED_LINE));
   const labeledCount = labeled.filter(Boolean).length;
-  const toKeys = (rhs) =>
-    rhs
-      .split(';')
-      .map((k) => k.trim())
-      .filter(Boolean);
+  const toKeys = splitKeys;
 
   const map = new Map();
   if (labeledCount === lines.length) {
@@ -332,7 +334,7 @@ export function parseEssay(value) {
 
 /**
  * O'quvchi tasdiqlashdan oldin javoblarini tuzatadi. Har qatorda bitta:
- * "12=b" (yopiq), "37=javob" (yozma), "40a=-" (javobni o'chirish), "esse=60".
+ * "12=b" (yopiq), "37=javob" (yozma), "40a=" (yozma javobni o'chirish), "esse=60".
  * @param {{label: string, kind: string, options?: number}[]} items
  * @returns {{ ok: true, fixes: Map<number, string>, essay?: number } | { ok: false, error: string }}
  */
@@ -364,13 +366,14 @@ export function parseStudentFixes(text, items, { hasEssay = false } = {}) {
         fixes.set(idx, '');
         continue;
       }
-      if (letter.length !== 1 || !optionLetters(item.options).includes(letter)) {
-        return { ok: false, error: `${label}-savol uchun ${optionRange(item.options)} harflaridan birini yozing.` };
+      if (letter.length !== 1 || !optionLetters(itemOptions(item)).includes(letter)) {
+        return { ok: false, error: `${label}-savol uchun ${optionRange(itemOptions(item))} harflaridan birini yozing.` };
       }
       fixes.set(idx, letter);
     } else {
       if (raw.length > MAX_OPEN_ANSWER) return { ok: false, error: `${label}-savol javobi juda uzun (${MAX_OPEN_ANSWER} belgigacha).` };
-      fixes.set(idx, raw === '-' ? '' : raw);
+      // "-" — tire javobi bo'lishi mumkin, shuning uchun javobni o'chirish: "40a=" (bo'sh)
+      fixes.set(idx, raw);
     }
   }
   return { ok: true, fixes, essay };

@@ -184,7 +184,7 @@ test("o'quvchi tasdiqlashdan oldin javobini tuzatadi", () => {
     { label: '36', kind: 'open' },
     { label: '40a', kind: 'open' },
   ];
-  const r = parseStudentFixes("1=C\n33=f\n36=o'g'il bola\n40a=-\nesse=61,5", items, { hasEssay: true });
+  const r = parseStudentFixes("1=C\n33=f\n36=o'g'il bola\n40a=\nesse=61,5", items, { hasEssay: true });
   assert.ok(r.ok);
   assert.deepEqual([...r.fixes], [[0, 'c'], [1, 'f'], [2, "o'g'il bola"], [3, '']]);
   assert.equal(r.essay, 61.5);
@@ -192,4 +192,24 @@ test("o'quvchi tasdiqlashdan oldin javobini tuzatadi", () => {
   assert.match(parseStudentFixes('1=e', items).error, /A–D/);
   assert.match(parseStudentFixes('esse=60', items).error, /esse yo'q/);
   assert.match(parseStudentFixes('99=a', items).error, /savoli yo'q/);
+});
+
+test("tuzatishda «-» — tire javobi (o'chirilmaydi), «;» — kalitda nuqtali vergulning o'zi", () => {
+  const items = [{ label: '37', kind: 'open' }];
+  assert.deepEqual([...parseStudentFixes('37=-', items).fixes], [[0, '-']]);
+  assert.deepEqual([...parseStudentFixes('37=', items).fixes], [[0, '']]);
+  assert.deepEqual(parseKeyForLabels(';', ['36']).items, [{ label: '36', key: [';'] }]);
+  assert.deepEqual(parseOpenKey('11=;', 10).items, [{ label: '11', key: [';'] }]);
+  assert.deepEqual([...parseKeyFixes('36=;', [{ label: '36', kind: 'open' }]).fixes], [['36', [';']]]);
+  assert.ok(isOpenCorrect(';', ['nuqtali vergul']));
+  assert.ok(isOpenCorrect('nuqtali vergul', [';']));
+});
+
+test('eski testlar: variantlar soni kalit harfidan aniqlanadi', async () => {
+  const { itemOptions } = await import('../src/lib/formats.js');
+  assert.equal(itemOptions({ key: ['b'] }), 4);
+  assert.equal(itemOptions({ key: ['e'] }), 6);
+  assert.equal(itemOptions({ key: ['f'] }), 6);
+  assert.equal(itemOptions({ options: 5, key: ['a'] }), 5);
+  assert.deepEqual([...parseStudentFixes('33=e', [{ label: '33', kind: 'closed', key: ['e'] }]).fixes], [[0, 'e']]);
 });

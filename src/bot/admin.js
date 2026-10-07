@@ -3,7 +3,7 @@ import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { config } from '../config.js';
 import { checkClosedRange, parseClosed, parseKeyFixes, parseKeyForLabels, parseOpenKey } from '../lib/answers.js';
-import { escapeHtml, formatClosedBlock, formatOpenBlock } from '../lib/format.js';
+import { escapeHtml, formatClosedBlock } from '../lib/format.js';
 import { FORMATS, formatTitle, optionRange, optionsSummary } from '../lib/formats.js';
 import { buildExcelReport } from '../lib/report.js';
 import {
@@ -28,7 +28,7 @@ import {
   optionsCountKb,
   testCardKb,
 } from './keyboards.js';
-import { HTML, adminCloseSummary, fixKeyPrompt, keyText, studentResult, testSummary } from './texts.js';
+import { HTML, adminCloseSummary, fitOpenBlock, fixKeyPrompt, keyText, studentResult, testSummary } from './texts.js';
 import { replyWithMenu, resetState, safeEdit, setState, sleep } from './helpers.js';
 
 // Telegram xabari 4096 belgidan oshmasligi uchun (ko'rib chiqish va kalit xabarlari)
@@ -87,19 +87,21 @@ function newTestPreview(data) {
   const closed = data.closedKey || [];
   const open = data.openItems || [];
   const pseudo = closed.map((k, i) => ({ label: String(i + 1), kind: 'closed', options: data.closedOptions[i] }));
-  let text = `📋 <b>Yangi test</b>: ${escapeHtml(data.name)}\n`;
-  text += `📘 Format: ${formatTitle(data.format)}\n`;
-  text += `Jami savollar: <b>${closed.length + open.length}</b> (yopiq ${closed.length}, yozma ${open.length})`;
-  text += data.hasEssay ? ' + esse\n' : '\n';
-  if (closed.length) text += `\n<b>Yopiq kalit</b> — ${optionsSummary(pseudo)}:\n${formatClosedBlock(closed)}\n`;
-  if (open.length) {
-    text += `\n<b>Yozma kalit:</b>\n${formatOpenBlock(
-      open.map((o) => o.label),
-      open.map((o) => o.key.join(' ; ')),
-    )}\n`;
-  }
-  text += `\n<b>Esse:</b> ${data.hasEssay ? "bor — o'quvchi oxirida esse balini (0–75) kiritadi" : "yo'q"}\n`;
-  return text + '\nSaqlaysizmi?';
+  let head = `📋 <b>Yangi test</b>: ${escapeHtml(data.name)}\n`;
+  head += `📘 Format: ${formatTitle(data.format)}\n`;
+  head += `Jami savollar: <b>${closed.length + open.length}</b> (yopiq ${closed.length}, yozma ${open.length})`;
+  head += data.hasEssay ? ' + esse\n' : '\n';
+  if (closed.length) head += `\n<b>Yopiq kalit</b> — ${optionsSummary(pseudo)}:\n${formatClosedBlock(closed)}\n`;
+  const tail =
+    `\n<b>Esse:</b> ${data.hasEssay ? "bor — o'quvchi oxirida esse balini (0–75) kiritadi" : "yo'q"}\n` + '\nSaqlaysizmi?';
+  if (!open.length) return head + tail;
+  return fitOpenBlock(
+    head,
+    '\n<b>Yozma kalit:</b>',
+    open.map((o) => o.label),
+    open.map((o) => o.key.join(' ; ')),
+    tail,
+  );
 }
 
 async function goToClosedStep(ctx, data) {

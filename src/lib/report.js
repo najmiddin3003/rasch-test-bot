@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import { formatDate } from './format.js';
-import { formatTitle, optionRange } from './formats.js';
+import { formatTitle, itemOptions, optionRange } from './formats.js';
 
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
 const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -107,7 +107,7 @@ export async function buildExcelReport(test, submissions) {
   for (const item of test.items) {
     const row = itemsSheet.addRow({
       label: item.label,
-      kind: item.kind === 'closed' ? `yopiq (${optionRange(item.options || 4)})` : 'yozma',
+      kind: item.kind === 'closed' ? `yopiq (${optionRange(itemOptions(item))})` : 'yozma',
       key: item.kind === 'closed' ? item.key[0].toUpperCase() : item.key.join(' ; '),
       correct: item.correctCount,
       percent: n ? Math.round((item.correctCount / n) * 1000) / 10 : 0,

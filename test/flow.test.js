@@ -239,6 +239,12 @@ test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, y
       assert.match(lastText(B), /36-savol<\/b> — javobingizni yozing/);
       // 36 o'tkaziladi, 37 — oddiy chiziqcha (tire), qolganlari aralash
       await answerOpen(B, 35, ['', '-', 'xato', '12', 'ot', 'xato', 'ega', 'xato', '7', '0.5', 'xato', 'Bobur', "'", 'xato']);
+      // 36 o'tkazilgan xabar 37 javobi bilan tahrirlanganda «o'tkazildi» izohi saqlanadi
+      const edited37 = sent.find(
+        (s) => s.method === 'editMessageText' && s.payload.chat_id === B && /37-savol<\/b>: <code>-<\/code>/.test(s.payload.text),
+      );
+      assert.ok(edited37, '37-savol javobi tahriri');
+      assert.match(edited37.payload.text, /36-savol: o'tkazildi/);
       await callback(B, 'e:s');
       assert.match(lastText(B), /Esse:<\/b> 0 \(kiritilmagan\)/);
       assert.match(lastText(B), /Javobsiz: 11, 21, 36/);

@@ -7,6 +7,15 @@ export function optionLetters(count) {
   return OPTION_LETTERS.slice(0, count || 4);
 }
 
+/**
+ * Yopiq savolning variantlar soni. Bugungi formatgacha yaratilgan testlarda maydon bo'sh —
+ * shunda kalit harfiga qarab: E yoki F bo'lsa 6 ta, aks holda 4 ta.
+ */
+export function itemOptions(item) {
+  if (item?.options) return item.options;
+  return OPTION_LETTERS.indexOf(item?.key?.[0]) >= 4 ? 6 : 4;
+}
+
 /** "A–D" ko'rinishi */
 export function optionRange(count) {
   const letters = optionLetters(count).toUpperCase();
@@ -49,10 +58,10 @@ export function optionsSummary(items) {
   const parts = [];
   let start = 0;
   for (let i = 1; i <= closed.length; i++) {
-    if (i === closed.length || (closed[i].options || 4) !== (closed[start].options || 4)) {
+    if (i === closed.length || itemOptions(closed[i]) !== itemOptions(closed[start])) {
       const from = closed[start].label;
       const to = closed[i - 1].label;
-      parts.push(`${from === to ? from : `${from}–${to}`}: ${optionRange(closed[start].options)}`);
+      parts.push(`${from === to ? from : `${from}–${to}`}: ${optionRange(itemOptions(closed[start]))}`);
       start = i;
     }
   }

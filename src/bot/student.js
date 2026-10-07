@@ -1,7 +1,7 @@
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { MAX_OPEN_ANSWER, checkClosedRange, parseClosed, parseEssay, parseStudentFixes } from '../lib/answers.js';
-import { optionLetters } from '../lib/formats.js';
+import { itemOptions, optionLetters } from '../lib/formats.js';
 import { escapeHtml } from '../lib/format.js';
 import { findTestByCode, submitAnswers, SubmitError } from '../services/testService.js';
 import { cancelMenu, closedAnswerKb, essaySkipKb, openSkipKb, submitConfirmKb } from './keyboards.js';
@@ -52,6 +52,9 @@ async function editById(ctx, msgId, text, extra = {}) {
 
 const callbackMsgId = (ctx) => ctx.callbackQuery?.message?.message_id;
 
+/** Xabar tepasidagi izoh (o'tkazilgan savollar) + yangi qator */
+const withNote = (data, line) => [data.note, line].filter(Boolean).join('\n');
+
 /** Test kodini qabul qilib, javob kiritishni boshlash */
 export async function beginTest(ctx, code) {
   const test = await findTestByCode(code);
@@ -100,16 +103,18 @@ async function showNext(ctx, test, data, { editMsgId = null, feedback = '' } = {
   if (item?.kind === 'closed') {
     const closed = closedItemsOf(test);
     const text = closedQuestionText(test, item, closed.indexOf(item) + 1, closed.length, feedback);
-    data.msgId = await show(text, closedAnswerKb(data.pos, item.options));
+    data.msgId = await show(text, closedAnswerKb(data.pos, itemOptions(item)));
     return setState(ctx, 'st_answer', data);
   }
   if (item?.kind === 'open') {
     const open = openItemsOf(test);
     data.msgId = await show(openQuestionText(item, open.indexOf(item) + 1, open.length, feedback), openSkipKb(data.pos));
+    data.note = feedback; // xabar tepasidagi izoh (masalan, o'tkazilgan savollar) — keyingi tahrirda saqlanadi
     return setState(ctx, 'st_answer', data);
   }
   if (test.hasEssay && data.essay === null && !data.essaySkipped) {
     data.msgId = await show(essayPromptText(feedback), essaySkipKb);
+    data.note = feedback;
     return setState(ctx, 'st_essay', data);
   }
   if (editMsgId && feedback) await editById(ctx, editMsgId, feedback);
@@ -145,7 +150,7 @@ function isCurrent(ctx, state, pos = null) {
 async function handleBulkClosed(ctx, test, data, text) {
   const closed = closedItemsOf(test);
   const parsed = parseClosed(text, { expected: closed.length, allowSkip: true });
-  const error = parsed.ok ? checkClosedRange(parsed.answers, closed.map((i) => i.options)) : parsed.error;
+  const error = parsed.ok ? checkClosedRange(parsed.answers, closed.map(itemOptions)) : parsed.error;
   if (error) {
     const looksLikeAnswers = text.replace(/\s/g, '').length >= Math.min(10, closed.length);
     await ctx.reply(
@@ -184,7 +189,7 @@ export async function handleStudentText(ctx, text) {
         return true;
       }
       data.answers[data.pos] = answer;
-      await editById(ctx, data.msgId, openAnsweredText(item, answer));
+      await editById(ctx, data.msgId, withNote(data, openAnsweredText(item, answer)));
       data.pos += 1;
       await showNext(ctx, test, data);
       return true;
@@ -204,7 +209,7 @@ export async function handleStudentText(ctx, text) {
     const data = copyData(ctx.user.stateData);
     data.essay = essay;
     data.essaySkipped = false;
-    await editById(ctx, data.msgId, essayDoneText(essay, false));
+    await editById(ctx, data.msgId, withNote(data, essayDoneText(essay, false)));
     await showPreview(ctx, test, data);
     return true;
   }
@@ -256,7 +261,7 @@ export function registerStudent(bot) {
     if (!test) return ctx.answerCallbackQuery();
     const item = test.items[pos];
     const letter = ctx.match[2] === 's' ? '' : ctx.match[2];
-    if (item?.kind !== 'closed' || (letter && !optionLetters(item.options).includes(letter))) {
+    if (item?.kind !== 'closed' || (letter && !optionLetters(itemOptions(item)).includes(letter))) {
       return ctx.answerCallbackQuery({ text: STALE });
     }
     await ctx.answerCallbackQuery();
@@ -287,9 +292,9 @@ export function registerStudent(bot) {
     data.pos = pos + 1;
     if (test.items[data.pos]?.kind === 'open' || (test.hasEssay && data.essay === null && !data.essaySkipped)) {
       // Keyingi savol (yoki esse) shu xabarning o'zida chiqadi
-      return showNext(ctx, test, data, { editMsgId: callbackMsgId(ctx), feedback: openSkippedText(item) });
+      return showNext(ctx, test, data, { editMsgId: callbackMsgId(ctx), feedback: withNote(data, openSkippedText(item)) });
     }
-    await editById(ctx, callbackMsgId(ctx), openSkippedText(item));
+    await editById(ctx, callbackMsgId(ctx), withNote(data, openSkippedText(item)));
     return showNext(ctx, test, data);
   });
 
@@ -302,7 +307,7 @@ export function registerStudent(bot) {
     const data = copyData(ctx.user.stateData);
     data.essay = null;
     data.essaySkipped = true;
-    await editById(ctx, callbackMsgId(ctx), essayDoneText(0, true));
+    await editById(ctx, callbackMsgId(ctx), withNote(data, essayDoneText(0, true)));
     return showPreview(ctx, test, data);
   });
 

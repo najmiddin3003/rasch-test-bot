@@ -1,7 +1,7 @@
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { checkAnswers } from '../lib/answers.js';
-import { ESSAY_MAX, optionLetters } from '../lib/formats.js';
+import { ESSAY_MAX, itemOptions, optionLetters } from '../lib/formats.js';
 import { computeResults } from '../lib/scoring.js';
 
 async function generateCode() {
@@ -243,7 +243,7 @@ export async function simulateSubmissions(test, count) {
       const ok = Math.random() < logistic(theta - difficulties[i]);
       if (item.kind === 'closed') {
         if (ok) return item.key[0];
-        const wrong = [...optionLetters(item.options)].filter((l) => l !== item.key[0]);
+        const wrong = [...optionLetters(itemOptions(item))].filter((l) => l !== item.key[0]);
         return wrong[Math.floor(Math.random() * wrong.length)];
       }
       return ok ? item.key[0] : 'xato';
