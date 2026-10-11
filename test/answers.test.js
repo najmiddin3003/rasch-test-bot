@@ -11,6 +11,7 @@ import {
   parseClosed,
   parseOpenAnswers,
   parseOpenKey,
+  stripLabelPrefix,
   toNumber,
 } from '../src/lib/answers.js';
 
@@ -212,4 +213,61 @@ test('eski testlar: variantlar soni kalit harfidan aniqlanadi', async () => {
   assert.equal(itemOptions({ key: ['f'] }), 6);
   assert.equal(itemOptions({ options: 5, key: ['a'] }), 5);
   assert.deepEqual([...parseStudentFixes('33=e', [{ label: '33', kind: 'closed', key: ['e'] }]).fixes], [[0, 'e']]);
+});
+
+// O'qituvchi kalitni "36-Qora", "40-a)ta'sir...", "b)chunki" ko'rinishida kiritgan (#71776, #79410):
+// raqamlar javobning bir qismi deb olinib, o'quvchilarning to'g'ri javoblari xato hisoblangan edi
+const ONA_TILI_OPEN = ['36', '37', '38', '39', '40a', '40b', '41a', '41b', '42a', '42b', '43a', '43b', '44a', '44b'];
+
+test("kalit: qator boshidagi savol raqami va a)/b) olib tashlanadi", () => {
+  const typed = [
+    '36-Qora', '37-,-', '38-da,ga', '39-Durust', "40-a)ta'sir ko'rsatadi", "b)so'rilishiga",
+    '41- A) 2 va 3', 'B)1va4', '42-b)istihfom', "b)ritorik so'roq gap", '43-a)k;', 'b)muqayyad',
+    '44-a) kamtarlik', 'b)kibrli, manman',
+  ].join('\n');
+  const parsed = parseKeyForLabels(typed, ONA_TILI_OPEN);
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.items.map((i) => i.key[0]), [
+    'Qora', ',-', 'da,ga', 'Durust', "ta'sir ko'rsatadi", "so'rilishiga", '2 va 3', '1va4', 'istihfom',
+    "ritorik so'roq gap", 'k', 'muqayyad', 'kamtarlik', 'kibrli, manman',
+  ]);
+  // Raqamli va raqamsiz qatorlar aralash bo'lsa ham (soni to'g'ri) — tartib bo'yicha
+  const mixed = parseKeyForLabels(typed.replace('36-Qora', '36) Qora'), ONA_TILI_OPEN);
+  assert.equal(mixed.items[0].key[0], 'Qora');
+});
+
+test("kalit: qator boshqa savol raqami bilan boshlansa — tartib buzilgan", () => {
+  const lines = ONA_TILI_OPEN.map((l, i) => `${l.replace(/[ab]$/, '')}-javob${i}`);
+  lines[2] = '39-javob'; // 38-savol o'rnida 39
+  const parsed = parseKeyForLabels(lines.join('\n'), ONA_TILI_OPEN);
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.error, /38-savol o'rnidagi qator "39"/);
+  // Javobning o'zi raqam bilan boshlansa (savol raqami emas) — xato emas
+  const answers = ONA_TILI_OPEN.map(() => 'x');
+  answers[4] = '1-shaxs';
+  assert.equal(parseKeyForLabels(answers.join('\n'), ONA_TILI_OPEN).items[4].key[0], '1-shaxs');
+});
+
+test("raqam olib tashlash javobning o'zini buzmaydi", () => {
+  assert.equal(stripLabelPrefix('36.6', '36'), '36.6'); // o'nli kasr
+  assert.equal(stripLabelPrefix('36-40', '36'), '36-40'); // oraliq
+  assert.equal(stripLabelPrefix(',', '37'), ',');
+  assert.equal(stripLabelPrefix(';', '37'), ';');
+  assert.equal(stripLabelPrefix('-', '38'), '-');
+  assert.equal(stripLabelPrefix('a)1va4, b)2va5', '41a'), '1va4, b)2va5');
+  assert.equal(stripLabelPrefix('A k', '43a'), 'A k', "kalitda «A k» — harf so'zning bir qismi bo'lishi mumkin");
+  assert.equal(stripLabelPrefix('A k', '43a', { bare: true }), 'k');
+  assert.deepEqual(parseOpenKey('6-Toshkent\n7-8', 5).items.map((i) => i.key[0]), ['Toshkent', '7-8']);
+});
+
+test("tekshirish: o'quvchi javobidagi va eski kalitdagi savol raqami/harfi e'tiborga olinmaydi", () => {
+  const items = [
+    { label: '43a', kind: 'open', key: ['43-a)k'] }, // eski (tozalanmagan) kalit
+    { label: '41b', kind: 'open', key: ['chunki'] },
+    { label: '39', kind: 'open', key: ['39.5'] },
+    { label: '37', kind: 'open', key: [','] },
+  ];
+  assert.deepEqual(checkAnswers(items, ['A k', 'b)chunki', '39.5', ',']), [1, 1, 1, 1]);
+  assert.deepEqual(checkAnswers(items, ['43-a)k;', 'B chunki', '39.5', 'vergul']), [1, 1, 1, 1]);
+  assert.deepEqual(checkAnswers(items, ['ak', 'chunkimi', '5', ';']), [0, 0, 0, 0], "ortiqcha qisqartirish yo'q");
 });

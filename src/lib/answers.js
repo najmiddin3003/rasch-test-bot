@@ -159,6 +159,44 @@ function normalizeLabel(label) {
 
 const LABELED_LINE = /^(\d+\s*[a-zа-я]?)\s*[=)]\s*(.*)$/i;
 
+// Qator boshidagi savol raqami: "36-", "36)", "36.", "36=". Ajratuvchi "-" yoki "." dan keyin
+// raqam kelsa — bu javobning o'zi (o'nli kasr 36.6, oraliq 36-40), olib tashlanmaydi.
+const NUMBER_PREFIX = String.raw`\s*(?:[=):]|[-.](?!\s*\d))\s*`;
+
+/**
+ * Kalit yoki javob boshidagi savol raqami va harfini olib tashlash: "36-Qora" → "Qora",
+ * "40-a)ta'sir" → "ta'sir", "b)chunki" → "chunki", "43-a)k;" → "k".
+ * bare — o'quvchi javobi uchun: "A k" → "k" (harfdan keyin faqat bo'sh joy).
+ */
+export function stripLabelPrefix(text, label, { bare = false } = {}) {
+  let s = String(text).trim();
+  const m = String(label).match(/^(\d+)([a-z]?)$/);
+  if (!m) return s;
+  const [, num, sub] = m;
+  s = s.replace(new RegExp(`^${num}${NUMBER_PREFIX}`), '');
+  if (sub) {
+    s = s.replace(new RegExp(String.raw`^(?:${num}\s*)?[a-f]u?\s*(?:[).:]|-(?!\s*\d))\s*`, 'i'), '');
+    if (bare) s = s.replace(new RegExp(String.raw`^${sub}\s+(?=\S)`, 'i'), '');
+  }
+  // "k;" → "k", lekin javobning o'zi tinish belgisi bo'lsa (";" yoki ",") tegilmaydi
+  if (/[\p{L}\p{N}]/u.test(s)) s = s.replace(/[;,]+$/, '').trim();
+  return s;
+}
+
+/**
+ * Tartib bilan yozilgan kalit qatori → muqobil javoblar (savol raqami/harfi olib tashlanadi).
+ * Qator boshqa savol raqami bilan boshlansa — tartib buzilgan (qator tushib qolgan yoki ortiqcha).
+ * @param {Set<string>} labelNumbers shu kalitdagi savol raqamlari ("36", "40", ...)
+ */
+function positionalKey(line, label, labelNumbers) {
+  const own = label.match(/^\d+/)[0];
+  const m = line.match(new RegExp(`^(\\d+)${NUMBER_PREFIX}`));
+  if (m && m[1] !== own && labelNumbers.has(m[1])) {
+    return { error: `${label}-savol o'rnidagi qator "${m[1]}" raqami bilan boshlangan — qatorlar tartibini tekshiring.` };
+  }
+  return { keys: splitKeys(line).map((k) => stripLabelPrefix(k, label)).filter(Boolean) };
+}
+
 function splitLines(text) {
   return String(text)
     .split(/\r?\n/)
@@ -183,11 +221,19 @@ export function parseOpenKey(text, closedCount) {
 
   const items = [];
   const seen = new Set();
+  // Erkin formatda javob ham raqam bilan boshlanishi mumkin ("7-sinf") — tartib tekshirilmaydi
+  const positionalNumbers = new Set();
   for (let idx = 0; idx < lines.length; idx++) {
     const m = labeled[idx];
     const label = m ? normalizeLabel(m[1]) : String(closedCount + idx + 1);
-    const rhs = m ? m[2] : lines[idx];
-    const keys = splitKeys(rhs);
+    let keys;
+    if (m) {
+      keys = splitKeys(m[2]);
+    } else {
+      const parsed = positionalKey(lines[idx], label, positionalNumbers);
+      if (parsed.error) return { ok: false, error: parsed.error };
+      keys = parsed.keys;
+    }
     if (!keys.length) return { ok: false, error: `${label}-savol uchun javob yozilmagan.` };
     if (seen.has(label)) return { ok: false, error: `${label}-savol ikki marta yozilgan.` };
     if (parseInt(label, 10) <= closedCount) {
@@ -290,6 +336,7 @@ export function checkClosedRange(answers, options) {
 /**
  * Admin uchun: berilgan savollar (shablon) bo'yicha yozma javoblar kaliti.
  * Har qatorda bitta javob tartib bilan yoki "36=javob" / "40a=javob"; muqobillar ";" bilan.
+ * Tartib bilan yozilganda qator boshidagi raqam va harf ("36-Qora", "40-a)...", "b)...") olib tashlanadi.
  * @param {string[]} labels kutilgan savollar, masalan ["36", "37", "40a", "40b"]
  */
 export function parseKeyForLabels(text, labels) {
@@ -297,7 +344,6 @@ export function parseKeyForLabels(text, labels) {
   if (!lines.length) return { ok: false, error: "Kalit bo'sh." };
   const labeled = lines.map((l) => l.match(LABELED_LINE));
   const labeledCount = labeled.filter(Boolean).length;
-  const toKeys = splitKeys;
 
   const map = new Map();
   if (labeledCount === lines.length) {
@@ -306,17 +352,21 @@ export function parseKeyForLabels(text, labels) {
       const label = normalizeLabel(m[1]);
       if (!labelSet.has(label)) return { ok: false, error: `"${label}" — bunday savol yo'q. Savollar: ${labels.join(', ')}` };
       if (map.has(label)) return { ok: false, error: `${label}-savol ikki marta yozilgan.` };
-      map.set(label, toKeys(m[2]));
+      map.set(label, splitKeys(m[2]));
     }
     const missing = labels.filter((l) => !map.has(l));
     if (missing.length) return { ok: false, error: `Quyidagi savollar kaliti yo'q: ${missing.join(', ')}` };
+  } else if (lines.length === labels.length) {
+    const numbers = new Set(labels.map((l) => l.match(/^\d+/)[0]));
+    for (const [i, label] of labels.entries()) {
+      const parsed = positionalKey(lines[i], label, numbers);
+      if (parsed.error) return { ok: false, error: parsed.error };
+      map.set(label, parsed.keys);
+    }
   } else if (labeledCount) {
     return { ok: false, error: "Yo hamma qatorlar raqamli (36=javob), yo hammasi raqamsiz bo'lsin." };
   } else {
-    if (lines.length !== labels.length) {
-      return { ok: false, error: `${labels.length} ta javob (har biri yangi qatorda) kerak, siz ${lines.length} ta yubordingiz.` };
-    }
-    labels.forEach((l, i) => map.set(l, toKeys(lines[i])));
+    return { ok: false, error: `${labels.length} ta javob (har biri yangi qatorda) kerak, siz ${lines.length} ta yubordingiz.` };
   }
   const empty = labels.filter((l) => !map.get(l).length);
   if (empty.length) return { ok: false, error: `Quyidagi savollar uchun javob yozilmagan: ${empty.join(', ')}` };
@@ -379,12 +429,22 @@ export function parseStudentFixes(text, items, { hasEssay = false } = {}) {
   return { ok: true, fixes, essay };
 }
 
+/**
+ * Yozma javobni tekshirish. Javob va kalit boshidagi savol raqami/harfi ("43-a)k", "A k",
+ * "b)chunki") e'tiborga olinmaydi — o'qituvchi ham, o'quvchi ham ularni yozib yuborishi mumkin.
+ */
+function isOpenItemCorrect(item, answer) {
+  const keys = [...new Set([...item.key, ...item.key.map((k) => stripLabelPrefix(k, item.label))])];
+  const stripped = stripLabelPrefix(answer, item.label, { bare: true });
+  return isOpenCorrect(answer, keys) || (stripped !== answer && isOpenCorrect(stripped, keys));
+}
+
 /** Test savollari va javoblar asosida 0/1 vektor */
 export function checkAnswers(items, answers) {
   return items.map((item, i) => {
     const a = answers[i] ?? '';
     if (!a) return 0;
     if (item.kind === 'closed') return a === item.key[0] ? 1 : 0;
-    return isOpenCorrect(a, item.key) ? 1 : 0;
+    return isOpenItemCorrect(item, a) ? 1 : 0;
   });
 }

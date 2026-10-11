@@ -79,6 +79,7 @@ function openKeyPrompt(data) {
       `3️⃣ <b>Yozma savollar kaliti</b> — ${labels.length} ta javob, har qatorda bittadan, tartib bilan:\n` +
       `<code>${labels.join(', ')}</code>\n\n` +
       'Yoki raqami bilan: <code>36=javob</code>, <code>40a=javob</code>\n' +
+      "• Qator boshidagi <code>36-</code>, <code>40-a)</code>, <code>b)</code> kabi raqamlar javobga qo'shilmaydi.\n" +
       "• Bir nechta to'g'ri javob bo'lsa <code>;</code> bilan ajrating: <code>37=o'g'il;bola</code>\n" +
       ANSWER_NOTE
     );
