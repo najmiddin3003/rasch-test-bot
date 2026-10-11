@@ -3,12 +3,23 @@ import dotenv from 'dotenv';
 
 dotenv.config({ quiet: true });
 
-const botToken = process.env.BOT_TOKEN || '';
+/**
+ * Hosting sozlamalariga qo'lda qo'yilgan qiymat: chetidagi bo'sh joy, yangi qator va qo'shtirnoq
+ * olib tashlanadi (.env da dotenv buni o'zi qiladi, Vercel/Render panelida esa qolib ketishi mumkin)
+ */
+export function cleanEnv(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^(['"])(.*)\1$/s, '$2')
+    .trim();
+}
+
+const botToken = cleanEnv(process.env.BOT_TOKEN);
 
 export const config = {
   botToken,
-  mongoUri: process.env.MONGODB_URI || '',
-  mongoDb: process.env.MONGODB_DB || 'rasch_bot',
+  mongoUri: cleanEnv(process.env.MONGODB_URI),
+  mongoDb: cleanEnv(process.env.MONGODB_DB) || 'rasch_bot',
   adminIds: (process.env.ADMIN_IDS || '')
     .split(',')
     .map((s) => Number(s.trim()))
@@ -19,7 +30,7 @@ export const config = {
   // Telegram secret_token: faqat A-Z, a-z, 0-9, _ va - (Render generateValue base64 beradi).
   // Berilmasa, tokendan hosil qilinadi — Vercel funksiyasi va webhook o'rnatish skripti bir xil oladi
   webhookSecret:
-    (process.env.WEBHOOK_SECRET || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 256) ||
+    cleanEnv(process.env.WEBHOOK_SECRET).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 256) ||
     crypto.createHash('sha256').update(`rasch-webhook:${botToken}`).digest('hex'),
   port: Number(process.env.PORT) || 10000,
 };
