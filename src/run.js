@@ -1,8 +1,11 @@
+// Ishga tushirish: kompyuterda long polling, Render'da webhook server.
+// Fayl nomi ataylab index/server/app emas: Vercel bunday fayllarni server deb ishga tushiradi
+// (api/ funksiyalari o'rniga) — Vercel'da bot faqat api/telegram.js orqali ishlaydi.
 import { config, validateConfig } from './config.js';
 import { connectDb, disconnectDb } from './db.js';
 import { ALLOWED_UPDATES, BOT_COMMANDS, createBot } from './bot/index.js';
 import { MAX_NOTIFY_ATTEMPTS, startNotify } from './bot/admin.js';
-import { createWebhookServer, WEBHOOK_PATH } from './server.js';
+import { createWebhookServer, WEBHOOK_PATH } from './webhook-server.js';
 import { pendingNotifications, recoverStuckTests } from './services/testService.js';
 
 async function main() {

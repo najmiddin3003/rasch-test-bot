@@ -100,7 +100,8 @@ npm test
 api/                    Vercel funksiyalari: telegram (webhook), health
 scripts/set-webhook.js  Telegram webhook'ni Vercel'ga ulash
 src/
-  index.js              ishga tushirish (kompyuter — long polling, Render — webhook server)
+  run.js                ishga tushirish (kompyuter — long polling, Render — webhook server)
+  webhook-server.js     Render uchun HTTP webhook server
   serverless.js         Vercel rejimi: webhook so'rovini botga uzatish, tiklash
   config.js, db.js
   models/               User, Test, Submission

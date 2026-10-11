@@ -22,7 +22,7 @@ before(async () => {
   await connectDb(uri, TEST_DB);
   await mongoose.connection.dropDatabase();
   const { createBot } = await import('../src/bot/index.js');
-  const { createWebhookServer } = await import('../src/server.js');
+  const { createWebhookServer } = await import('../src/webhook-server.js');
   const bot = createBot('123:TEST', {
     botInfo: { id: 1, is_bot: true, first_name: 'T', username: 'rasch_test_bot', can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false },
   });

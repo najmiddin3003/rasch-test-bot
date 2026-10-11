@@ -2,11 +2,10 @@
   "name": "rasch-test-bot",
   "version": "1.0.0",
   "description": "Rasch modeli asosida test javoblarini tekshiruvchi Telegram bot",
-  "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "start": "node src/run.js",
+    "dev": "node --watch src/run.js",
     "test": "node --test"
   },
   "engines": {
