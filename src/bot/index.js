@@ -9,6 +9,8 @@ import { replyWithMenu, resetState, setState } from './helpers.js';
 import { beginTest, handleStudentText, registerStudent, showMyResults } from './student.js';
 import { handleAdminText, registerAdmin } from './admin.js';
 
+export const ALLOWED_UPDATES = ['message', 'callback_query'];
+
 export const BOT_COMMANDS = [
   { command: 'start', description: 'Boshlash / menyu' },
   { command: 'help', description: 'Yordam' },
@@ -27,18 +29,20 @@ async function askForName(ctx, pendingCode = null) {
 /**
  * @param {string} token
  * @param {import('grammy').BotConfig} [botConfig] testlarda botInfo berish uchun
+ * @param {{ cacheUsers?: boolean }} [options] cacheUsers: false — bir nechta nusxa ishlaganda (Vercel)
  */
-export function createBot(token, botConfig = {}) {
+export function createBot(token, botConfig = {}, { cacheUsers = true } = {}) {
   const bot = new Bot(token, botConfig);
   bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 30 }));
 
   // Foydalanuvchi hujjatlari keshi: har xabarda bazaga murojaat qilmaslik uchun.
-  // Bot bitta jarayonda ishlaydi va User faqat shu yerdan o'zgaradi, shuning uchun kesh eskirmaydi.
+  // Bot bitta jarayonda ishlasa (Render, kompyuter), User faqat shu yerdan o'zgaradi va kesh eskirmaydi.
+  // Serverless'da so'rovlar turli nusxalarga tushadi — kesh eskirishi mumkin, shuning uchun o'chiriladi.
   const userCache = new Map();
   const loadUser = async (from) => {
     const username = from.username ?? null;
     const firstName = from.first_name ?? null;
-    const cached = userCache.get(from.id);
+    const cached = cacheUsers ? userCache.get(from.id) : null;
     if (cached && Date.now() - cached.at < USER_CACHE_TTL) {
       if (cached.doc.username !== username || cached.doc.firstName !== firstName) {
         cached.doc.set({ username, firstName });
@@ -51,9 +55,11 @@ export function createBot(token, botConfig = {}) {
       { $set: { username, firstName } },
       { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
     );
-    userCache.delete(from.id);
-    userCache.set(from.id, { doc, at: Date.now() });
-    if (userCache.size > USER_CACHE_MAX) userCache.delete(userCache.keys().next().value);
+    if (cacheUsers) {
+      userCache.delete(from.id);
+      userCache.set(from.id, { doc, at: Date.now() });
+      if (userCache.size > USER_CACHE_MAX) userCache.delete(userCache.keys().next().value);
+    }
     return doc;
   };
 

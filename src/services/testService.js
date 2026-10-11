@@ -227,8 +227,13 @@ export async function publishTest(testId) {
 }
 
 /** Yuborilmay qolgan natijalar (bot natija yuborayotganda qayta ishga tushgan bo'lsa) */
-export async function pendingNotifications(maxAttempts) {
-  const tests = await Test.find({ status: 'closed', publishedAt: { $ne: null } });
+/**
+ * @param {{ publishedBeforeMs?: number }} [options] faqat shuncha vaqtdan oldin e'lon qilinganlar —
+ *   serverless'da boshqa nusxa hozir yuborayotgan natijalarga tegmaslik uchun
+ */
+export async function pendingNotifications(maxAttempts, { publishedBeforeMs = 0 } = {}) {
+  const publishedAt = publishedBeforeMs ? { $lt: new Date(Date.now() - publishedBeforeMs) } : { $ne: null };
+  const tests = await Test.find({ status: 'closed', publishedAt });
   const result = [];
   for (const test of tests) {
     const submissions = await Submission.find({
@@ -251,8 +256,10 @@ export async function deleteTest(testId) {
  * Ishga tushganda: "yopilmoqda" holatida qolib ketgan testlarni tiklash va eski versiyada
  * yopilgan (natijalari darhol yuborilgan) testlarni "e'lon qilingan" deb belgilash.
  */
-export async function recoverStuckTests() {
-  const res = await Test.updateMany({ status: 'closing' }, { $set: { status: 'open' } });
+export async function recoverStuckTests({ olderThanMs = 0 } = {}) {
+  // Serverless'da bir nechta nusxa ishlaydi: faqat uzoq vaqt "yopilmoqda" turib qolganlari tiklanadi
+  const stuck = olderThanMs ? { status: 'closing', updatedAt: { $lt: new Date(Date.now() - olderThanMs) } } : { status: 'closing' };
+  const res = await Test.updateMany(stuck, { $set: { status: 'open' } });
   // Aggregation pipeline bilan yangilash — to'g'ridan-to'g'ri drayver orqali (Mongoose casting siz)
   await Test.collection.updateMany({ status: 'closed', publishedAt: { $exists: false } }, [
     { $set: { publishedAt: '$closedAt' } },

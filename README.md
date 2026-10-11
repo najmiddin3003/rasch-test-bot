@@ -60,6 +60,17 @@ Kalit va o'quvchi javobi boshidagi savol raqami va harfi (`36-Qora`, `40-a)ta'si
 
 Ochiq javoblar solishtirilganda katta-kichik harf va bo'shliqlar e'tiborga olinmaydi, sonlar qiymati bo'yicha tekshiriladi (`0,5` = `0.5` = `1/2`), kirill klaviaturada terilgan o'xshash harflar lotinga o'giriladi.
 
+## Vercel'ga joylash (bepul, hozirgi hosting)
+
+Vercel'da bot serverless funksiya sifatida ishlaydi: `api/telegram.js` — Telegram webhook, `api/health.js` — tekshiruv. `vercel.json` da funksiyalar Sidneyda (`syd1`, MongoDB Atlas yonida) joylashadi, har biri ko'pi bilan 60 soniya ishlaydi.
+
+1. Vercel → **Add New → Project** → GitHub'dagi shu repo (har `git push` da avtomatik joylanadi).
+2. **Settings → Environment Variables**: `BOT_TOKEN`, `MONGODB_URI` (maxfiy), `MONGODB_DB=rasch_bot`, `ADMIN_IDS`, `ENABLE_SIMULATE=false` → qayta joylash (Redeploy).
+3. Brauzerda `https://<loyiha>.vercel.app/api/health` → `{"ok":true,...}`.
+4. Webhook'ni ulash (bir marta, kompyuterdan, `.env` dagi `BOT_TOKEN` bilan): `node scripts/set-webhook.js https://<loyiha>.vercel.app`
+
+Telegram yangilanishlarni ketma-ket yuboradi (`max_connections: 1`); natijalarni yuborish javobdan keyin fonda (`waitUntil`) davom etadi. Funksiya nusxalari ko'p bo'lishi mumkinligi uchun foydalanuvchi keshi o'chirilgan. Bot boshqa joyda (kompyuter yoki Render) ishga tushirilsa, webhook o'sha yerga o'tadi — bir vaqtda faqat bittasi ishlasin.
+
 ## Render'ga joylash (bepul tarif)
 
 Render'ning bepul tarifida Background Worker yo'q, shuning uchun bot **Web Service** sifatida **webhook** rejimida ishlaydi. `RENDER_EXTERNAL_URL` (yoki `WEBHOOK_URL`) bo'lsa, webhook avtomatik yoqiladi, lokal ishga tushirilganda esa long polling ishlatiladi.
@@ -86,8 +97,11 @@ npm test
 ## Tuzilma
 
 ```
+api/                    Vercel funksiyalari: telegram (webhook), health
+scripts/set-webhook.js  Telegram webhook'ni Vercel'ga ulash
 src/
-  index.js              ishga tushirish
+  index.js              ishga tushirish (kompyuter — long polling, Render — webhook server)
+  serverless.js         Vercel rejimi: webhook so'rovini botga uzatish, tiklash
   config.js, db.js
   models/               User, Test, Submission
   lib/rasch.js          Rasch: CML (savollar), WLE (qatnashchilar), moslik statistikalari

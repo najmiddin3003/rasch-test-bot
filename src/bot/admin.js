@@ -6,6 +6,7 @@ import { checkClosedRange, parseClosed, parseKeyFixes, parseKeyForLabels, parseO
 import { escapeHtml, formatClosedBlock } from '../lib/format.js';
 import { FORMATS, formatTitle, optionRange, optionsSummary } from '../lib/formats.js';
 import { detectKeyShift } from '../lib/keyShift.js';
+import { runInBackground } from '../lib/background.js';
 import { buildExcelReport } from '../lib/report.js';
 import {
   closeTest,
@@ -352,7 +353,7 @@ export async function notifyParticipants(api, test, submissions) {
 export function startNotify(api, test, submissions, adminChatId) {
   const id = test._id.toString();
   notifying.add(id);
-  notifyParticipants(api, test, submissions)
+  return runInBackground(notifyParticipants(api, test, submissions)
     .then(({ sent, failed }) => {
       if (adminChatId && (sent || failed)) {
         const what = test.revision ? 'tuzatilgan natijalar' : 'natijalar';
@@ -361,7 +362,7 @@ export function startNotify(api, test, submissions, adminChatId) {
       }
     })
     .catch((err) => console.error('notifyParticipants:', err))
-    .finally(() => notifying.delete(id));
+    .finally(() => notifying.delete(id)));
 }
 
 export function registerAdmin(bot) {

@@ -1,12 +1,9 @@
-import crypto from 'node:crypto';
 import { config, validateConfig } from './config.js';
 import { connectDb, disconnectDb } from './db.js';
-import { createBot, BOT_COMMANDS } from './bot/index.js';
+import { ALLOWED_UPDATES, BOT_COMMANDS, createBot } from './bot/index.js';
 import { MAX_NOTIFY_ATTEMPTS, startNotify } from './bot/admin.js';
 import { createWebhookServer, WEBHOOK_PATH } from './server.js';
 import { pendingNotifications, recoverStuckTests } from './services/testService.js';
-
-const ALLOWED_UPDATES = ['message', 'callback_query'];
 
 async function main() {
   validateConfig();
@@ -30,7 +27,7 @@ async function main() {
   if (config.webhookUrl) {
     // Webhook rejimi (Render): Telegram har bir yangilanishni HTTP so'rov qilib yuboradi.
     // Bepul tarifda server uxlab qolsa, Telegram so'rovi uni uyg'otadi.
-    const secretToken = config.webhookSecret || crypto.randomBytes(24).toString('hex');
+    const secretToken = config.webhookSecret;
     const server = createWebhookServer(bot, { secretToken });
     await new Promise((resolve) => server.listen(config.port, resolve));
     await bot.api.setWebhook(`${config.webhookUrl}${WEBHOOK_PATH}`, {
