@@ -1,6 +1,6 @@
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
-import { MAX_OPEN_ANSWER, checkClosedRange, parseClosed, parseEssay, parseStudentFixes } from '../lib/answers.js';
+import { MAX_OPEN_ANSWER, checkClosedRange, labeledLine, parseClosed, parseEssay, parseStudentFixes } from '../lib/answers.js';
 import { itemOptions, optionLetters } from '../lib/formats.js';
 import { escapeHtml } from '../lib/format.js';
 import { findTestByCode, submitAnswers, SubmitError } from '../services/testService.js';
@@ -54,6 +54,15 @@ const callbackMsgId = (ctx) => ctx.callbackQuery?.message?.message_id;
 
 /** Xabar tepasidagi izoh (o'tkazilgan savollar) + yangi qator */
 const withNote = (data, line) => [data.note, line].filter(Boolean).join('\n');
+
+/**
+ * `from` dan boshlab hali javob ham, «O'tkazish» ham bo'lmagan birinchi yozma savol; qolmagan bo'lsa —
+ * savollar oxiri (esse yoki tekshirish). Raqami bilan oldinroq javob berilgan savollar qayta so'ralmaydi.
+ */
+function nextOpenPos(test, data, from) {
+  const i = test.items.findIndex((it, k) => k >= from && it.kind === 'open' && data.answers[k] == null);
+  return i < 0 ? test.items.length : i;
+}
 
 /** Test kodini qabul qilib, javob kiritishni boshlash */
 export async function beginTest(ctx, code) {
@@ -171,46 +180,59 @@ async function handleBulkClosed(ctx, test, data, text) {
 
 /** "37=javob" yoki "37) javob" — qator boshidagi raqam aynan shu savolniki bo'lsa, olib tashlanadi */
 function stripOwnLabel(line, label) {
-  const m = line.match(/^(\d+)\s*([a-zа-я]?)\s*[=)]\s*(.*)$/i);
-  if (!m) return line;
-  const lineLabel = `${m[1]}${m[2]}`.toLowerCase().replace('а', 'a').replace('б', 'b');
-  return lineLabel === label ? m[3].trim() : line;
+  const parsed = labeledLine(line);
+  return parsed?.label === label ? parsed.value : line;
 }
 
 /**
  * Yozma savolga javob. Bir xabarda bir nechta qator bo'lsa — har bir qator navbatdagi
- * savolning javobi (o'quvchilar ko'pincha hammasini bitta xabarda yuboradi).
+ * savolning javobi (o'quvchilar ko'pincha hammasini bitta xabarda yuboradi). Hamma qatorlar
+ * raqami bilan yozilgan bo'lsa («36=...», «38=...») — har biri o'sha savolga: o'quvchi savolni
+ * tashlab ketgan yoki oldingi javobini tuzatayotgan bo'lsa ham javob boshqa savolga yozilib qolmaydi.
  */
 async function handleOpenText(ctx, test, data, text) {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
-  const remaining = test.items.slice(data.pos).filter((i) => i.kind === 'open');
   if (!lines.length) {
     await ctx.reply("❗ Javob bo'sh. Javobni yozing yoki «⏭ O'tkazish» ni bosing.");
     return;
   }
-  if (lines.length > remaining.length) {
-    await ctx.reply(
-      `❗ Xabarda ${lines.length} ta qator bor, lekin ${remaining.length} ta yozma savol qoldi ` +
-        `(${remaining[0].label}–${remaining.at(-1).label}). Har bir javobni alohida yuboring ` +
-        "yoki qatorlar sonini to'g'rilang.",
-    );
-    return;
+  const byLabel = new Map(openItemsOf(test).map((it) => [it.label, it]));
+  const labeled = lines.map(labeledLine);
+  let targets;
+  let answers;
+  if (labeled.every((l) => byLabel.has(l?.label)) && new Set(labeled.map((l) => l.label)).size === lines.length) {
+    targets = labeled.map((l) => byLabel.get(l.label));
+    answers = labeled.map((l) => l.value);
+  } else {
+    const pending = test.items.filter((it, k) => k >= data.pos && it.kind === 'open' && data.answers[k] == null);
+    if (lines.length > pending.length) {
+      await ctx.reply(
+        `❗ Xabarda ${lines.length} ta qator bor, lekin ${pending.length} ta yozma savol qoldi ` +
+          `(${pending[0].label}–${pending.at(-1).label}). Har bir javobni alohida yuboring ` +
+          "yoki qatorlar sonini to'g'rilang.",
+      );
+      return;
+    }
+    targets = pending.slice(0, lines.length);
+    answers = lines.map((line, k) => stripOwnLabel(line, targets[k].label));
   }
-  const answers = lines.map((line, k) => stripOwnLabel(line, remaining[k].label));
   const tooLong = answers.findIndex((a) => a.length > MAX_OPEN_ANSWER);
   if (tooLong >= 0) {
-    await ctx.reply(`❗ ${remaining[tooLong].label}-savol javobi juda uzun (${MAX_OPEN_ANSWER} belgigacha). Qisqaroq yozing.`);
+    await ctx.reply(`❗ ${targets[tooLong].label}-savol javobi juda uzun (${MAX_OPEN_ANSWER} belgigacha). Qisqaroq yozing.`);
     return;
   }
   answers.forEach((a, k) => {
-    data.answers[test.items.indexOf(remaining[k])] = a;
+    data.answers[test.items.indexOf(targets[k])] = a;
   });
-  const shown = answers.map((a, k) => openAnsweredText(remaining[k], a.length > 60 ? `${a.slice(0, 59)}…` : a));
+  // «37=» (bo'sh) — javobsiz, o'tkazilgan deb ko'rsatiladi
+  const shown = answers.map((a, k) =>
+    a ? openAnsweredText(targets[k], a.length > 60 ? `${a.slice(0, 59)}…` : a) : openSkippedText(targets[k]),
+  );
   await editById(ctx, data.msgId, withNote(data, shown.join('\n')));
-  data.pos = test.items.indexOf(remaining[answers.length - 1]) + 1;
+  data.pos = nextOpenPos(test, data, data.pos);
   await showNext(ctx, test, data);
 }
 
@@ -326,7 +348,7 @@ export function registerStudent(bot) {
 
     const data = copyData(ctx.user.stateData);
     data.answers[pos] = '';
-    data.pos = pos + 1;
+    data.pos = nextOpenPos(test, data, pos + 1);
     if (test.items[data.pos]?.kind === 'open' || (test.hasEssay && data.essay === null && !data.essaySkipped)) {
       // Keyingi savol (yoki esse) shu xabarning o'zida chiqadi
       return showNext(ctx, test, data, { editMsgId: callbackMsgId(ctx), feedback: withNote(data, openSkippedText(item)) });

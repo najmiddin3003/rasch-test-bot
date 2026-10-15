@@ -7,7 +7,10 @@ import { ensureDb } from '../src/serverless.js';
 
 export default {
   async fetch() {
-    const missing = ['BOT_TOKEN', 'MONGODB_URI'].filter((key) => !process.env[key]);
+    // Tozalangan qiymatlar tekshiriladi: panelda faqat bo'sh joy yoki "" yozilgan bo'lsa ham "yo'q" deb chiqadi
+    const missing = Object.entries({ BOT_TOKEN: config.botToken, MONGODB_URI: config.mongoUri })
+      .filter(([, value]) => !value)
+      .map(([key]) => key);
     if (missing.length) return Response.json({ ok: false, missing }, { status: 500 });
     const result = { ok: true, admins: config.adminIds.length };
     try {

@@ -153,11 +153,20 @@ export function isOpenCorrect(answer, keys) {
   });
 }
 
-function normalizeLabel(label) {
-  return mapChars(String(label).toLowerCase(), { ...LOOKALIKES, ...CLOSED_EXTRA }).replace(/\s+/g, '');
+/** Savol nomi: "40 А" → "40a", "07" → "7" (kirill harf va boshidagi nollar) */
+export function normalizeLabel(label) {
+  return mapChars(String(label).toLowerCase(), { ...LOOKALIKES, ...CLOSED_EXTRA })
+    .replace(/\s+/g, '')
+    .replace(/^0+(?=\d)/, '');
 }
 
 const LABELED_LINE = /^(\d+\s*[a-zа-я]?)\s*[=)]\s*(.*)$/i;
+
+/** Raqamli qator: "37=javob", "40а) javob" → { label: "40a", value: "javob" }; raqamsiz bo'lsa null */
+export function labeledLine(line) {
+  const m = String(line).trim().match(LABELED_LINE);
+  return m ? { label: normalizeLabel(m[1]), value: m[2].trim() } : null;
+}
 
 // Qator boshidagi savol raqami: "36-", "36)", "36.", "36=". Ajratuvchi "-" yoki "." dan keyin
 // raqam kelsa — bu javobning o'zi (o'nli kasr 36.6, oraliq 36-40), olib tashlanmaydi.

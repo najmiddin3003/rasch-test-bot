@@ -13,6 +13,10 @@ import { pendingNotifications, recoverStuckTests } from './services/testService.
 // Bir nechta nusxa parallel ishlashi mumkin: boshqa nusxa hozir bajarayotgan ishga tegmaslik uchun
 // faqat shundan eski "osilib qolgan" holatlar tiklanadi (funksiya 60 soniyadan ko'p ishlamaydi)
 const STALE_MS = 3 * 60 * 1000;
+// Nusxa uzoq yashashi mumkin, natija yuborish esa funksiya vaqti tugaganda uzilib qoladi — tiklash
+// faqat ishga tushganda emas, vaqti-vaqti bilan takrorlanadi. Xabar ikki marta ketmaydi: har biri
+// yuborishdan oldin bazada band qilinadi (claimNotification)
+const RECOVER_EVERY_MS = 5 * 60 * 1000;
 
 let dbReady = null;
 let botReady = null;
@@ -46,7 +50,7 @@ export function getBot() {
 async function recover(bot) {
   await recoverStuckTests({ olderThanMs: STALE_MS });
   for (const { test, submissions } of await pendingNotifications(MAX_NOTIFY_ATTEMPTS, { publishedBeforeMs: STALE_MS })) {
-    startNotify(bot.api, test, submissions, test.createdBy);
+    startNotify(bot.api, test, submissions, test.createdBy, { onlyIfSent: true });
   }
 }
 
@@ -54,12 +58,13 @@ async function recover(bot) {
  * @param {{
  *   getBot: () => Promise<import('grammy').Bot>,
  *   secretToken: string,
- *   onFirstUpdate?: (bot: import('grammy').Bot) => Promise<void>,
- * }} deps onFirstUpdate — nusxa ishga tushgach bir marta, fonda (sukut bo'yicha: tiklash)
+ *   onRecover?: (bot: import('grammy').Bot) => Promise<void>,
+ *   recoverEveryMs?: number,
+ * }} deps onRecover — fonda: birinchi yangilanishda va keyin har recoverEveryMs da (sukut bo'yicha: tiklash)
  * @returns {(request: Request) => Promise<Response>}
  */
-export function createTelegramHandler({ getBot: loadBot, secretToken, onFirstUpdate = recover }) {
-  let started = false;
+export function createTelegramHandler({ getBot: loadBot, secretToken, onRecover = recover, recoverEveryMs = RECOVER_EVERY_MS }) {
+  let lastRecovery = null;
   return async function handle(request) {
     if (request.method !== 'POST') return new Response('ok');
     if (request.headers.get('x-telegram-bot-api-secret-token') !== secretToken) {
@@ -72,9 +77,9 @@ export function createTelegramHandler({ getBot: loadBot, secretToken, onFirstUpd
       return new Response('bad request', { status: 400 });
     }
     const bot = await loadBot();
-    if (!started) {
-      started = true;
-      runInBackground(onFirstUpdate(bot).catch((err) => console.error('Tiklash:', err)));
+    if (lastRecovery === null || Date.now() - lastRecovery >= recoverEveryMs) {
+      lastRecovery = Date.now();
+      runInBackground(onRecover(bot).catch((err) => console.error('Tiklash:', err)));
     }
     try {
       await bot.handleUpdate(update);

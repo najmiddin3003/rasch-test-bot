@@ -140,7 +140,7 @@ function correlation(x, y) {
 test('simulyatsiya qilingan parametrlarni tiklaydi', () => {
   const { theta, b, matrix } = simulate(500, 40);
   const res = estimateRasch(matrix);
-  assert.ok(res.converged, 'JMLE yaqinlashishi kerak');
+  assert.ok(res.converged, 'CML yaqinlashishi kerak');
   assert.ok(correlation(res.difficulty, b) > 0.97, 'qiyinliklar korrelyatsiyasi');
   assert.ok(correlation(res.theta, theta) > 0.9, 'qobiliyatlar korrelyatsiyasi');
   const meanB = res.difficulty.reduce((a, v) => a + v, 0) / res.difficulty.length;

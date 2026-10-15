@@ -214,7 +214,10 @@ export async function publishTest(testId) {
   // (belgilar e'londan oldin tozalanadi: bot to'xtab qolsa, qayta ishga tushganda davom etadi)
   const pending = await Test.findOne({ _id: testId, status: 'closed', publishedAt: null });
   if (pending?.revision) {
-    await Submission.updateMany({ test: pending._id }, { $set: { notified: false, notifyAttempts: 0 } });
+    await Submission.updateMany(
+      { test: pending._id },
+      { $set: { notified: false, notifyAttempts: 0, notifyClaimedAt: null } },
+    );
   }
   const test = await Test.findOneAndUpdate(
     { _id: testId, status: 'closed', publishedAt: null },
@@ -226,25 +229,68 @@ export async function publishTest(testId) {
   return { test, submissions };
 }
 
-/** Yuborilmay qolgan natijalar (bot natija yuborayotganda qayta ishga tushgan bo'lsa) */
 /**
+ * Yuborilmay qolgan natijalar (bot natija yuborayotganda to'xtagan yoki funksiya vaqti tugagan bo'lsa).
+ * Bazaga murojaatlar soni testlar soniga bog'liq emas: tiklash serverless'da tez-tez ishlaydi.
  * @param {{ publishedBeforeMs?: number }} [options] faqat shuncha vaqtdan oldin e'lon qilinganlar —
  *   serverless'da boshqa nusxa hozir yuborayotgan natijalarga tegmaslik uchun
  */
 export async function pendingNotifications(maxAttempts, { publishedBeforeMs = 0 } = {}) {
   const publishedAt = publishedBeforeMs ? { $lt: new Date(Date.now() - publishedBeforeMs) } : { $ne: null };
-  const tests = await Test.find({ status: 'closed', publishedAt });
-  const result = [];
-  for (const test of tests) {
-    const submissions = await Submission.find({
-      test: test._id,
-      notified: false,
-      simulated: false,
-      notifyAttempts: { $lt: maxAttempts },
-    });
-    if (submissions.length) result.push({ test, submissions });
+  const testIds = await Test.distinct('_id', { status: 'closed', publishedAt });
+  if (!testIds.length) return [];
+  const submissions = await Submission.find({
+    test: { $in: testIds },
+    notified: false,
+    simulated: false,
+    notifyAttempts: { $lt: maxAttempts },
+  }).sort({ rank: 1, createdAt: 1 });
+  const byTest = new Map();
+  for (const s of submissions) {
+    const id = s.test.toString();
+    if (!byTest.has(id)) byTest.set(id, []);
+    byTest.get(id).push(s);
   }
-  return result;
+  if (!byTest.size) return [];
+  const tests = await Test.find({ _id: { $in: [...byTest.keys()] } });
+  return tests.map((test) => ({ test, submissions: byTest.get(test._id.toString()) }));
+}
+
+// Natija xabarini band qilish muddati: shundan eski belgi — yuboruvchi to'xtab qolgan
+// (Vercel funksiyasi 60 soniyadan ko'p ishlamaydi), xabarni boshqasi yuborishi mumkin
+export const NOTIFY_CLAIM_MS = 3 * 60 * 1000;
+
+/**
+ * Natija xabarini yuborish uchun band qilish. Bir nechta nusxa (Vercel) yoki qayta tiklash bir
+ * o'quvchiga natijani ikki marta yubormaydi. Band qilingan vaqt yoki null (boshqasi yubormoqda / yuborilgan).
+ */
+export async function claimNotification(submissionId) {
+  const now = new Date();
+  const { modifiedCount } = await Submission.updateOne(
+    {
+      _id: submissionId,
+      notified: false,
+      $or: [{ notifyClaimedAt: null }, { notifyClaimedAt: { $lt: new Date(now.getTime() - NOTIFY_CLAIM_MS) } }],
+    },
+    { $set: { notifyClaimedAt: now } },
+  );
+  return modifiedCount ? now : null;
+}
+
+/**
+ * Yuborish natijasini yozish. Belgi o'zgargan bo'lsa (kalit tuzatilib, natijalar qayta e'lon qilingan) —
+ * hech narsa yozilmaydi: o'quvchi tuzatilgan natijani ham oladi.
+ */
+export function finishNotification(submissionId, claimedAt, { sent }) {
+  return Submission.updateOne(
+    { _id: submissionId, notifyClaimedAt: claimedAt },
+    sent ? { $set: { notified: true } } : { $set: { notifyClaimedAt: null }, $inc: { notifyAttempts: 1 } },
+  );
+}
+
+/** Test hali o'sha e'lon holatidami (kalit tuzatilmagan, o'chirilmagan) — eski natija yuborilmasin */
+export async function isStillPublished(test) {
+  return Boolean(await Test.exists({ _id: test._id, status: 'closed', publishedAt: test.publishedAt }));
 }
 
 export async function deleteTest(testId) {
