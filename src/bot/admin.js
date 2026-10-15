@@ -9,13 +9,16 @@ import { detectKeyShift } from '../lib/keyShift.js';
 import { runInBackground } from '../lib/background.js';
 import { buildExcelReport } from '../lib/report.js';
 import {
+  claimNotification,
   closeTest,
   countAnswering,
   countSubmissions,
   createTest,
   deleteTest,
   findTestByCode,
+  finishNotification,
   fixKeys,
+  isStillPublished,
   publishTest,
   reopenTest,
   simulateSubmissions,
@@ -329,40 +332,57 @@ async function sendReport(ctx, test, submissions) {
   });
 }
 
-/** Qatnashchilarga natijalarni yuborish (Telegram limiti: ~30 xabar/sek) */
+/**
+ * Qatnashchilarga natijalarni yuborish (Telegram limiti: ~30 xabar/sek). Har bir xabar oldin bazada
+ * band qilinadi — boshqa nusxa yoki qayta tiklash shu o'quvchiga ikkinchi marta yubormaydi.
+ * Test e'lon holatidan chiqsa (kalit tuzatildi yoki test o'chirildi), eski natija yuborilmaydi.
+ */
 export async function notifyParticipants(api, test, submissions) {
   let sent = 0;
   let failed = 0;
   for (const sub of submissions) {
     if (sub.simulated || sub.notified) continue;
+    if (sent || failed) await sleep(40);
+    if (!(await isStillPublished(test))) break;
+    const claimedAt = await claimNotification(sub._id);
+    if (!claimedAt) continue;
     try {
       await api.sendMessage(sub.userId, studentResult(test, sub), HTML);
-      await Submission.updateOne({ _id: sub._id }, { $set: { notified: true } });
-      sent++;
     } catch (err) {
       failed++;
-      await Submission.updateOne({ _id: sub._id }, { $inc: { notifyAttempts: 1 } }).catch(() => {});
+      await finishNotification(sub._id, claimedAt, { sent: false }).catch(() => {});
       console.warn(`Natija yuborilmadi (user ${sub.userId}):`, err?.description || err?.message);
+      continue;
     }
-    await sleep(40);
+    sent++;
+    await finishNotification(sub._id, claimedAt, { sent: true });
   }
   return { sent, failed };
 }
 
-/** Natijalarni fonda yuborib, tugagach adminga xabar beradi (botni bloklamaydi) */
-export function startNotify(api, test, submissions, adminChatId) {
+/**
+ * Natijalarni fonda yuborib, tugagach adminga xabar beradi (botni bloklamaydi).
+ * @param {{ onlyIfSent?: boolean }} [options] onlyIfSent — qayta tiklashda: faqat kimgadir yuborilgan bo'lsa
+ *   xabar beriladi (botni bloklaganlarga qayta urinish haqida adminga qayta-qayta yozilmaydi)
+ */
+export function startNotify(api, test, submissions, adminChatId, { onlyIfSent = false } = {}) {
   const id = test._id.toString();
+  // Shu nusxada allaqachon yuborilmoqda (masalan, qayta tiklash takrorlandi)
+  if (notifying.has(id)) return Promise.resolve();
   notifying.add(id);
-  return runInBackground(notifyParticipants(api, test, submissions)
-    .then(({ sent, failed }) => {
-      if (adminChatId && (sent || failed)) {
-        const what = test.revision ? 'tuzatilgan natijalar' : 'natijalar';
-        const tail = failed ? `, yuborilmadi: ${failed} ta (botni bloklagan yoki ishga tushirmagan)` : '';
-        return api.sendMessage(adminChatId, `📨 #${test.code}: ${what} yuborildi — ${sent} ta${tail}.`);
-      }
-    })
-    .catch((err) => console.error('notifyParticipants:', err))
-    .finally(() => notifying.delete(id)));
+  return runInBackground(
+    notifyParticipants(api, test, submissions)
+      // Yuborish tugashi bilan kalitni tuzatish ochiladi — adminga xabar ketishi kutilmaydi
+      .finally(() => notifying.delete(id))
+      .then(({ sent, failed }) => {
+        if (adminChatId && (sent || (failed && !onlyIfSent))) {
+          const what = test.revision ? 'tuzatilgan natijalar' : 'natijalar';
+          const tail = failed ? `, yuborilmadi: ${failed} ta (botni bloklagan yoki ishga tushirmagan)` : '';
+          return api.sendMessage(adminChatId, `📨 #${test.code}: ${what} yuborildi — ${sent} ta${tail}.`);
+        }
+      })
+      .catch((err) => console.error('notifyParticipants:', err)),
+  );
 }
 
 export function registerAdmin(bot) {

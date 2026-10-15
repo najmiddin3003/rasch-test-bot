@@ -8,6 +8,7 @@ import {
   parseStudentFixes,
   parseKeyFixes,
   isOpenCorrect,
+  labeledLine,
   parseClosed,
   parseOpenAnswers,
   parseOpenKey,
@@ -117,6 +118,22 @@ test('kalitni tuzatish parseri', () => {
   assert.match(parseKeyFixes('8=c', items).error, /yo'q/);
   assert.match(parseKeyFixes('7=cd', items).error, /bitta harf/);
   assert.equal(parseKeyFixes('salom', items).ok, false);
+});
+
+test("savol raqamidagi boshlang'ich nollar va kirill harf e'tiborga olinmaydi (07=c, 040а=...)", () => {
+  const items = [
+    { label: '7', kind: 'closed', options: 4 },
+    { label: '40a', kind: 'open' },
+  ];
+  assert.deepEqual([...parseKeyFixes('07=c\n040а=ot', items).fixes.entries()], [
+    ['7', ['c']],
+    ['40a', ['ot']],
+  ]);
+  assert.deepEqual([...parseStudentFixes('07=b', items).fixes.entries()], [[0, 'b']]);
+  assert.deepEqual(parseOpenKey('036=12', 35).items, [{ label: '36', key: ['12'] }]);
+  assert.deepEqual(labeledLine(' 40 А) ta\'sir '), { label: '40a', value: "ta'sir" });
+  assert.deepEqual(labeledLine('37='), { label: '37', value: '' });
+  assert.equal(labeledLine('36-Qora'), null);
 });
 
 test("xato matnlarida foydalanuvchi kiritgan < va & bo'lishi mumkin (HTML escape talab qilinadi)", () => {

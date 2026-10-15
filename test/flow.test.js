@@ -485,9 +485,11 @@ const lastButtons = (chatId) =>
     .payload.reply_markup.inline_keyboard.flat()
     .map((b) => b.callback_data);
 
-async function waitNotified(testId, count) {
+/** Natijalar yuborilib, adminga «📨 #kod: ... yuborildi» xabari kelguncha (round — shu testda nechanchi yuborish) */
+async function waitNotified(t, count, round = 1) {
+  const done = () => textsTo(ADMIN).filter((x) => x.startsWith(`📨 #${t.code}:`) && x.includes('yuborildi —')).length;
   for (let i = 0; i < 150; i++) {
-    if ((await models.Submission.countDocuments({ test: testId, notified: true })) === count) return;
+    if (done() >= round && (await models.Submission.countDocuments({ test: t._id, notified: true })) === count) return;
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.fail('natijalar yuborilmadi');
@@ -520,7 +522,7 @@ test("Natija yuborilgandan keyin: surilgan kalit aniqlanadi, tuzatiladi va natij
 
   // Admin baribir yuboradi — o'quvchilar xato natija oladi
   await callback(ADMIN, `t:publishok:${t._id}`);
-  await waitNotified(t._id, 8);
+  await waitNotified(t, 8);
   const old = await models.Submission.findOne({ test: t._id, userId: ids[1] });
   assert.doesNotMatch(lastText(ids[1]), /qayta hisoblandi/);
 
@@ -547,11 +549,97 @@ test("Natija yuborilgandan keyin: surilgan kalit aniqlanadi, tuzatiladi va natij
   await callback(ADMIN, `t:publish:${t._id}`);
   assert.match(lastText(ADMIN), /tuzatilgan natijalari barcha qatnashchilarga «qayta hisoblandi» deb yuborilsinmi/);
   await callback(ADMIN, `t:publishok:${t._id}`);
-  await waitNotified(t._id, 8);
+  await waitNotified(t, 8, 2);
   const fixed = await models.Submission.findOne({ test: t._id, userId: ids[1] });
   assert.ok(fixed.rawScore > old.rawScore, `${old.rawScore} → ${fixed.rawScore}`);
   assert.match(lastText(ids[1]), /Natijangiz qayta hisoblandi/);
   assert.match(lastText(ids[1]), new RegExp(`To'g'ri javoblar: <b>${fixed.rawScore}/8</b>`));
   assert.ok(textsTo(ADMIN).some((x) => x.includes('tuzatilgan natijalar yuborildi — 8 ta')));
   assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
+});
+
+test("Yozma javoblar raqami bilan: boshqa savolga yozilib qolmaydi, tashlab ketilgan savol qayta so'raladi", { skip, timeout: 300000 }, async () => {
+  const t = await services.createTest({
+    name: 'Raqamli javoblar',
+    createdBy: ADMIN,
+    closedKey: ['a'],
+    closedOptions: [4],
+    openItems: ['ikki', 'uch', "to'rt", 'besh'].map((key, i) => ({ label: String(i + 2), key: [key] })),
+  });
+  const G = 6001;
+  await message(G, `/start ${t.code}`);
+  await message(G, "O'quvchi G");
+  await callback(G, 'q:0:a');
+  assert.match(lastText(G), /<b>2-savol<\/b> — javobingizni yozing/);
+
+  // 2-savolda turib 3-savol javobini raqami bilan yozdi — 3 ga yoziladi, 2 qayta so'raladi
+  await message(G, '3=uch');
+  assert.ok(textsTo(G).some((x) => x.includes('<b>3-savol</b>: <code>uch</code>')));
+  assert.match(lastText(G), /<b>2-savol<\/b> — javobingizni yozing/);
+
+  // Raqamsiz qatorlar — navbatdagi javobsiz savollarga (javob berilgan 3 o'tkazib yuboriladi)
+  await message(G, "ikki\nto'rt");
+  assert.match(lastText(G), /<b>5-savol<\/b> — javobingizni yozing/);
+
+  // Oldingi javobni raqami bilan tuzatish — joriy savol o'zgarmaydi
+  await message(G, '2=IKKI');
+  assert.match(lastText(G), /<b>5-savol<\/b> — javobingizni yozing/);
+  await callback(G, 'o:4:s');
+  assert.match(lastText(G), /Javoblaringizni tekshiring/);
+  await callback(G, 'sub:confirm');
+
+  const sub = await models.Submission.findOne({ test: t._id, userId: G });
+  assert.deepEqual(sub.answers, ['a', 'IKKI', 'uch', "to'rt", '']);
+  assert.deepEqual(sub.correct, [1, 1, 1, 1, 0]);
+  assert.deepEqual(sent.filter((s) => s.rejected).map((s) => s.payload.text), []);
+});
+
+test("Natija yuborish: ikki parallel yuboruvchi bir o'quvchiga ikki marta yubormaydi, kalit tuzatilsa eski natija ketmaydi", { skip, timeout: 300000 }, async () => {
+  const { notifyParticipants } = await import('../src/bot/admin.js');
+  const t = await services.createTest({ name: 'Parallel', createdBy: ADMIN, closedKey: ['a', 'b'], closedOptions: [4, 4], openItems: [] });
+  const ids = Array.from({ length: 6 }, (_, k) => 7001 + k);
+  for (const [k, id] of ids.entries()) {
+    await services.submitAnswers(t, { telegramId: id, fullName: `P${k}`, username: null }, ['a', k % 2 ? 'b' : 'c']);
+  }
+  await services.closeTest(t._id);
+
+  const calls = [];
+  let blocked = ids[5];
+  const api = {
+    async sendMessage(chatId, text) {
+      if (chatId === blocked) throw new Error('Forbidden: bot was blocked by the user');
+      calls.push({ chatId, text });
+      await new Promise((r) => setTimeout(r, 5));
+    },
+  };
+  const published = await services.publishTest(t._id);
+  const [a, b] = await Promise.all([
+    notifyParticipants(api, published.test, published.submissions),
+    notifyParticipants(api, published.test, published.submissions),
+  ]);
+  assert.equal(calls.length, 5, 'har bir o\'quvchiga bir marta');
+  assert.equal(new Set(calls.map((c) => c.chatId)).size, 5);
+  assert.equal(a.sent + b.sent, 5);
+  const failedSub = await models.Submission.findOne({ test: t._id, userId: ids[5] });
+  assert.equal(failedSub.notified, false);
+  assert.ok(a.failed + b.failed >= 1);
+  assert.equal(failedSub.notifyAttempts, a.failed + b.failed);
+  assert.equal(failedSub.notifyClaimedAt, null, "yuborilmagan xabar band qilinmay qoladi — keyin qayta urinish mumkin");
+
+  // O'quvchi botni blokdan chiqardi — qayta tiklash yuborilmay qolganini yuboradi
+  blocked = null;
+  const [pending] = (await services.pendingNotifications(3)).filter((p) => p.test._id.equals(t._id));
+  assert.deepEqual(pending.submissions.map((s) => s.userId), [ids[5]]);
+  await notifyParticipants(api, pending.test, pending.submissions);
+  assert.equal(calls.filter((c) => c.chatId === ids[5]).length, 1);
+
+  // Kalit tuzatildi — eski e'lon bo'yicha yuborish to'xtaydi; qayta e'lon qilinganda hamma tuzatilganini oladi
+  await services.fixKeys(t._id, new Map([['2', ['c']]]));
+  const stale = await notifyParticipants(api, published.test, published.submissions.map((s) => Object.assign(s, { notified: false })));
+  assert.deepEqual(stale, { sent: 0, failed: 0 });
+  const republished = await services.publishTest(t._id);
+  calls.length = 0;
+  await notifyParticipants(api, republished.test, republished.submissions);
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every((c) => /qayta hisoblandi/.test(c.text)));
 });

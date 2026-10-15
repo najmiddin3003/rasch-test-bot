@@ -22,6 +22,9 @@ const submissionSchema = new mongoose.Schema(
     outfit: { type: Number, default: null },
     notified: { type: Boolean, default: false },
     notifyAttempts: { type: Number, default: 0 },
+    // Natija xabari yuborilmoqda (shu vaqtda band qilingan): boshqa nusxa yoki qayta tiklash
+    // xabarni ikkinchi marta yubormasligi uchun
+    notifyClaimedAt: { type: Date, default: null },
     simulated: { type: Boolean, default: false },
   },
   { timestamps: true },

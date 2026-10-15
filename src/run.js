@@ -8,6 +8,17 @@ import { MAX_NOTIFY_ATTEMPTS, startNotify } from './bot/admin.js';
 import { createWebhookServer, WEBHOOK_PATH } from './webhook-server.js';
 import { pendingNotifications, recoverStuckTests } from './services/testService.js';
 
+// Yuborilmay qolgan natijalar vaqti-vaqti bilan qayta tekshiriladi: to'xtagan jarayonning band qilingan
+// xabari muddati o'tgach yuboriladi, vaqtinchalik xato bilan yuborilmaganlariga qayta urinib ko'riladi
+const RECOVER_EVERY_MS = 5 * 60 * 1000;
+
+async function resumeNotifications(api) {
+  for (const { test, submissions } of await pendingNotifications(MAX_NOTIFY_ATTEMPTS)) {
+    console.log(`📨 #${test.code}: ${submissions.length} ta yuborilmagan natija qayta yuborilmoqda`);
+    startNotify(api, test, submissions, test.createdBy, { onlyIfSent: true });
+  }
+}
+
 async function main() {
   validateConfig();
 
@@ -22,10 +33,11 @@ async function main() {
   await bot.api.setMyCommands(BOT_COMMANDS);
 
   // Natija yuborish jarayonida bot to'xtagan bo'lsa — qolganlarini yuborish
-  for (const { test, submissions } of await pendingNotifications(MAX_NOTIFY_ATTEMPTS)) {
-    console.log(`📨 #${test.code}: ${submissions.length} ta yuborilmagan natija qayta yuborilmoqda`);
-    startNotify(bot.api, test, submissions, test.createdBy);
-  }
+  await resumeNotifications(bot.api);
+  setInterval(
+    () => resumeNotifications(bot.api).catch((err) => console.error('Tiklash:', err)),
+    RECOVER_EVERY_MS,
+  ).unref();
 
   if (config.webhookUrl) {
     // Webhook rejimi (Render): Telegram har bir yangilanishni HTTP so'rov qilib yuboradi.

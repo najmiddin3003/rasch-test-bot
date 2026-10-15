@@ -10,7 +10,7 @@ if (!/^https:\/\/[^/]+$/.test(base)) {
   console.error('Foydalanish: node scripts/set-webhook.js https://<loyiha>.vercel.app');
   process.exit(1);
 }
-validateConfig();
+validateConfig({ db: false });
 
 const api = new Api(config.botToken);
 await api.setWebhook(`${base}/api/telegram`, {

@@ -32,7 +32,7 @@ const post = (body, secret = SECRET) =>
 test("webhook: secret token tekshiriladi, yangilanish botga beriladi, ishga tushish ishi bir marta", async () => {
   const bot = fakeBot();
   let started = 0;
-  const handle = createTelegramHandler({ getBot: async () => bot, secretToken: SECRET, onFirstUpdate: async () => started++ });
+  const handle = createTelegramHandler({ getBot: async () => bot, secretToken: SECRET, onRecover: async () => started++ });
 
   assert.equal((await handle(new Request('https://bot.example/api/telegram'))).status, 200);
   assert.equal((await handle(post({ update_id: 1 }, null))).status, 401);
@@ -50,7 +50,7 @@ test("webhook: bot xatosi foydalanuvchiga aytiladi va 200 qaytadi (Telegram qayt
   const bot = fakeBot(() => {
     throw new BotError(new Error('kutilmagan'), { update: {} });
   });
-  const handle = createTelegramHandler({ getBot: async () => bot, secretToken: SECRET, onFirstUpdate: async () => {} });
+  const handle = createTelegramHandler({ getBot: async () => bot, secretToken: SECRET, onRecover: async () => {} });
   assert.equal((await handle(post({ update_id: 1 }))).status, 200);
   assert.equal(bot.errors.length, 1);
 
@@ -62,6 +62,23 @@ test("webhook: bot xatosi foydalanuvchiga aytiladi va 200 qaytadi (Telegram qayt
     secretToken: SECRET,
   });
   await assert.rejects(() => broken(post({ update_id: 2 })), /MongoDB ulanmadi/);
+});
+
+test("tiklash vaqti-vaqti bilan takrorlanadi (uzoq yashaydigan nusxada yuborilmay qolgan natijalar)", async () => {
+  const bot = fakeBot();
+  let recovered = 0;
+  const handle = createTelegramHandler({
+    getBot: async () => bot,
+    secretToken: SECRET,
+    onRecover: async () => recovered++,
+    recoverEveryMs: 300,
+  });
+  await handle(post({ update_id: 1 }));
+  await handle(post({ update_id: 2 }));
+  assert.equal(recovered, 1, 'oraliq tugamaguncha qayta ishga tushmaydi');
+  await new Promise((r) => setTimeout(r, 320));
+  await handle(post({ update_id: 3 }));
+  assert.equal(recovered, 2);
 });
 
 test('fondagi ishlar waitUntil ga topshiriladi', async () => {
