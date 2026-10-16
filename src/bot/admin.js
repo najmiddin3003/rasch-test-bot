@@ -146,7 +146,11 @@ async function goToOpenStep(ctx, data) {
 }
 
 /** To'g'ri javob variantlari: "<code>o'g'il</code> yoki <code>bola</code>" */
-const keyVariantsText = (key) => key.map((k) => `<code>${escapeHtml(k)}</code>`).join(' yoki ');
+const keyVariantsText = (key) => {
+  // Uzun kalit qisqartiriladi — xabar Telegram chegarasidan (4096) oshmasin
+  const shown = key.slice(0, 10).map((k) => `<code>${escapeHtml(k.length > 60 ? `${k.slice(0, 59)}…` : k)}</code>`);
+  return shown.join(' yoki ') + (key.length > 10 ? ` va yana ${key.length - 10} ta` : '');
+};
 
 /** Shablonda navbatdagi yozma savol kalitini so'rash — har bir savol alohida xabarda */
 async function askOpenKey(ctx, data, head = '') {
@@ -175,8 +179,12 @@ async function goToConfirm(ctx, data) {
       reply_markup: optionsCountKb,
     });
   }
-  await setState(ctx, 'nt_confirm', data);
-  return ctx.reply(newTestPreview(data), { ...HTML, reply_markup: newTestConfirmKb(data.format, data.openItems.length > 0) });
+  const msg = await ctx.reply(newTestPreview(data), {
+    ...HTML,
+    reply_markup: newTestConfirmKb(data.format, data.openItems.length > 0),
+  });
+  // previewId — «↩️ Yozma kalitni qayta kiritish» faqat shu (oxirgi) ko'rib chiqishdan ishlaydi
+  return setState(ctx, 'nt_confirm', { ...data, previewId: msg.message_id });
 }
 
 export async function startNewTest(ctx) {
@@ -252,7 +260,7 @@ export async function handleAdminText(ctx, text) {
     const next = { ...data, openItems: [...openItems, { label, key: parsed.key }] };
     if (next.openItems.length < labels.length) {
       const warn = hasOldSeparator(parsed.key)
-        ? "⚠️ «;» endi ajratuvchi emas — javob bitta deb olindi. Bir nechta to'g'ri javob bo'lsa, vergul " +
+        ? "⚠️ «;» va «|» ajratuvchi emas — javob bitta deb olindi. Bir nechta to'g'ri javob bo'lsa, vergul " +
           'bilan yozing (↩️ tugmasi bilan qayta yozish mumkin).\n'
         : '';
       await askOpenKey(ctx, next, `✅ ${questionName(label)}: ${keyVariantsText(parsed.key)}\n${warn}\n`);
@@ -507,7 +515,7 @@ export function registerAdmin(bot) {
     adminOnly,
     step(['nt_confirm'], (ctx, data) => {
       const items = data.openItems || [];
-      if (!items.length) return;
+      if (!items.length || ctx.callbackQuery.message?.message_id !== data.previewId) return;
       if (data.format !== 'ona_tili') return goToOpenStep(ctx, { ...data, openItems: [] });
       const removed = items.at(-1);
       return askOpenKey(
