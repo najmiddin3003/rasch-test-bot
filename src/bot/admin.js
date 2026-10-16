@@ -2,9 +2,9 @@ import { InlineKeyboard, InputFile } from 'grammy';
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { config } from '../config.js';
-import { checkClosedRange, parseClosed, parseKeyFixes, parseKeyForLabels, parseOpenKey } from '../lib/answers.js';
+import { checkClosedRange, parseClosed, parseKeyFixes, parseOpenKey, parseSingleKey } from '../lib/answers.js';
 import { escapeHtml, formatClosedBlock } from '../lib/format.js';
-import { FORMATS, formatTitle, optionRange, optionsSummary } from '../lib/formats.js';
+import { FORMATS, formatTitle, optionRange, optionsSummary, questionName } from '../lib/formats.js';
 import { detectKeyShift } from '../lib/keyShift.js';
 import { runInBackground } from '../lib/background.js';
 import { buildExcelReport } from '../lib/report.js';
@@ -31,6 +31,7 @@ import {
   formatKb,
   newTestConfirmKb,
   noOpenKb,
+  openKeyBackKb,
   optionsCountKb,
   testCardKb,
 } from './keyboards.js';
@@ -55,6 +56,8 @@ const FINISHED_ORDER = { closedAt: -1, _id: -1 };
 
 // Yangi test yaratish holatlari (stateData: name, format, options, closedOptions, closedKey, openItems, hasEssay):
 //   nt_name → nt_format → [erkin: nt_options] → nt_closed → nt_open → [erkin: nt_essay] → nt_confirm
+// Shablonda nt_open — yozma kalit bittalab: har xabar openItems ga bitta savol qo'shadi,
+// promptId — «Oldingi savolni qayta yozish» tugmasi turgan oxirgi so'rov xabari.
 
 const ANSWER_NOTE =
   "• Tutuq belgisi (' ` ‘ ʼ) va tire (- – —) qanday yozilishidan qat'i nazar teng hisoblanadi, " +
@@ -78,13 +81,14 @@ function closedKeyPrompt(data) {
 
 function openKeyPrompt(data) {
   if (data.format === 'ona_tili') {
-    const labels = FORMATS.ona_tili.openLabels;
     return (
-      `3️⃣ <b>Yozma savollar kaliti</b> — ${labels.length} ta javob, har qatorda bittadan, tartib bilan:\n` +
-      `<code>${labels.join(', ')}</code>\n\n` +
-      'Yoki raqami bilan: <code>36=javob</code>, <code>40a=javob</code>\n' +
-      "• Qator boshidagi <code>36-</code>, <code>40-a)</code>, <code>b)</code> kabi raqamlar javobga qo'shilmaydi.\n" +
-      "• Bir nechta to'g'ri javob bo'lsa <code>;</code> bilan ajrating: <code>37=o'g'il;bola</code>\n" +
+      `3️⃣ <b>Yozma savollar kaliti</b> — ${FORMATS.ona_tili.openLabels.length} ta savol. Bot ularni bittalab ` +
+      "so'raydi, har bir javobni <b>alohida xabarda</b> yuboring.\n\n" +
+      "• Bir nechta to'g'ri javob bo'lsa, vergul bilan ajrating: <code>o'g'il, bola</code>\n" +
+      "• Javobning o'zi vergul bo'lsa, uni boshida yozing: <code>,</code> — vergul; <code>,,;</code> — vergul " +
+      'yoki nuqtali vergul (birinchi vergul — javob, ikkinchisi — ajratuvchi).\n' +
+      "• Raqamlar orasidagi vergul — o'nli kasr: <code>0,5</code> bitta javob.\n" +
+      "• Boshidagi <code>36-</code>, <code>40-a)</code>, <code>b)</code> kabi raqamlar javobga qo'shilmaydi.\n" +
       ANSWER_NOTE
     );
   }
@@ -127,8 +131,23 @@ async function goToClosedStep(ctx, data) {
 }
 
 async function goToOpenStep(ctx, data) {
+  if (data.format === 'ona_tili') return askOpenKey(ctx, { ...data, openItems: [] }, `${openKeyPrompt(data)}\n\n`);
   await setState(ctx, 'nt_open', data);
-  return ctx.reply(openKeyPrompt(data), { ...HTML, reply_markup: data.format === 'ona_tili' ? undefined : noOpenKb });
+  return ctx.reply(openKeyPrompt(data), { ...HTML, reply_markup: noOpenKb });
+}
+
+/** To'g'ri javob variantlari: "<code>o'g'il</code> yoki <code>bola</code>" */
+const keyVariantsText = (key) => key.map((k) => `<code>${escapeHtml(k)}</code>`).join(' yoki ');
+
+/** Shablonda navbatdagi yozma savol kalitini so'rash — har bir savol alohida xabarda */
+async function askOpenKey(ctx, data, head = '') {
+  const labels = FORMATS.ona_tili.openLabels;
+  const pos = data.openItems.length;
+  const msg = await ctx.reply(`${head}❓ <b>${questionName(labels[pos])}</b> kaliti (${pos + 1}/${labels.length}):`, {
+    ...HTML,
+    reply_markup: pos ? openKeyBackKb : undefined,
+  });
+  return setState(ctx, 'nt_open', { ...data, promptId: msg.message_id });
 }
 
 /** Erkin formatda — esse bor-yo'qligini so'rash; shablonda esse har doim bor */
@@ -206,11 +225,32 @@ export async function handleAdminText(ctx, text) {
     return true;
   }
 
+  if (state === 'nt_open' && data.format === 'ona_tili') {
+    const labels = FORMATS.ona_tili.openLabels;
+    const openItems = data.openItems || [];
+    const label = labels[openItems.length];
+    if (!label) {
+      await goToEssayStep(ctx, data);
+      return true;
+    }
+    const parsed = parseSingleKey(text, label, labels);
+    if (!parsed.ok) {
+      await ctx.reply(`❗ ${escapeHtml(parsed.error)}\n\n${questionName(label)} kalitini qayta yuboring.`, HTML);
+      return true;
+    }
+    // «Oldingi savolni qayta yozish» tugmasi faqat oxirgi so'rovda turadi
+    if (openItems.length) await ctx.api.editMessageReplyMarkup(ctx.chat.id, data.promptId).catch(() => {});
+    const next = { ...data, openItems: [...openItems, { label, key: parsed.key }] };
+    if (next.openItems.length < labels.length) {
+      await askOpenKey(ctx, next, `✅ ${questionName(label)}: ${keyVariantsText(parsed.key)}\n\n`);
+    } else {
+      await goToEssayStep(ctx, next);
+    }
+    return true;
+  }
+
   if (state === 'nt_open') {
-    const parsed =
-      data.format === 'ona_tili'
-        ? parseKeyForLabels(text, FORMATS.ona_tili.openLabels)
-        : parseOpenKey(text, data.closedKey.length);
+    const parsed = parseOpenKey(text, data.closedKey.length);
     if (!parsed.ok) {
       await ctx.reply(`❗ ${escapeHtml(parsed.error)}\n\nQayta yuboring.`, HTML);
       return true;
@@ -430,6 +470,21 @@ export function registerAdmin(bot) {
     'nt:noclosed',
     adminOnly,
     step(['nt_options', 'nt_closed'], (ctx, data) => goToOpenStep(ctx, { ...data, closedKey: [], closedOptions: [] })),
+  );
+
+  bot.callbackQuery(
+    'nt:back',
+    adminOnly,
+    step(['nt_open'], (ctx, data) => {
+      const items = data.openItems || [];
+      if (data.format !== 'ona_tili' || !items.length || ctx.callbackQuery.message?.message_id !== data.promptId) return;
+      const removed = items.at(-1);
+      return askOpenKey(
+        ctx,
+        { ...data, openItems: items.slice(0, -1) },
+        `↩️ ${questionName(removed.label)} kaliti (${keyVariantsText(removed.key)}) o'chirildi — qayta yuboring.\n\n`,
+      );
+    }),
   );
 
   bot.callbackQuery(

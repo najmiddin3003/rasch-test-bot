@@ -16,7 +16,7 @@ Test javoblarini **Rasch modeli** (savollar — CML, qatnashchilar — WLE) asos
 
 **Admin**
 1. «➕ Yangi test» → test nomi → **format**:
-   - **Ona tili (Milliy sertifikat)**: 1–32 A–D, 33–35 A–F, 36–39 bitta yozma javob, 40–44 ikki yozma javob (a, b), oxirida esse. Admin 35 ta harfli kalitni (`abcd...` yoki `1a2b3c...`) va 14 ta yozma javobni (har qatorda bittadan yoki `36=javob`, muqobillar `;` bilan) kiritadi.
+   - **Ona tili (Milliy sertifikat)**: 1–32 A–D, 33–35 A–F, 36–39 bitta yozma javob, 40–44 ikki yozma javob (a, b), oxirida esse. Admin 35 ta harfli kalitni (`abcd...` yoki `1a2b3c...`) kiritadi, keyin bot 14 ta yozma savol kalitini **bittalab** so'raydi — har biri alohida xabarda (bir xabarda bir nechta qator bo'lsa, rad etiladi). Bir nechta to'g'ri javob vergul bilan ajratiladi: `o'g'il, bola`. Javobning o'zi vergul bo'lsa, boshida yoziladi: `,` — vergul, `,,;` — vergul yoki nuqtali vergul (birinchi vergul — javob, ikkinchisi — ajratuvchi). Raqamlar orasidagi vergul — o'nli kasr (`0,5`). Xato kiritilsa — «↩️ Oldingi savolni qayta yozish».
    - **Erkin format**: yopiq savollar variantlari soni (4/5/6), yopiq kalit, yozma kalit (`36a=12`, `37=0.5;1/2`), esse bor/yo'q.
 2. Bot test **kodi** va havolasini beradi (`https://t.me/<bot>?start=<kod>`).
 3. «📋 Testlar» → testni tanlab «🔒 Yopish va hisoblash» (pastda batafsil). Ro'yxatda faol testlar doim tepada, tugagan testlar bazadan 5 tadan olinadi (oxirgi yopilgani birinchi), «⬅️ Oldingi» / «Keyingi ➡️» bilan varaqlanadi.
@@ -56,7 +56,7 @@ BMBA'ning [baholash mezonlari](https://uzbmb.uz/upload/file/pdf/mtt/Baholash_mez
 
 Hech kim javob yubormagan test yopilsa, hisob-kitob va yuborish bosqichi bo'lmaydi: adminga «Ishtirokchilar mavjud emas — test yopildi» deb chiqadi, hech kimga xabar yuborilmaydi. Yopishdan oldin bot javob kiritishni boshlagan, lekin hali yubormagan o'quvchilar sonini ham ogohlantiradi.
 
-Kalit va o'quvchi javobi boshidagi savol raqami va harfi (`36-Qora`, `40-a)ta'sir`, `b)chunki`, `A k`) e'tiborga olinmaydi; tartib bilan yozilgan kalitda qator boshqa savol raqami bilan boshlansa (`38` o'rnida `39-...`), bot tartib buzilganini aytadi.
+Kalit va o'quvchi javobi boshidagi savol raqami va harfi (`36-Qora`, `40-a)ta'sir`, `b)chunki`, `A k`) e'tiborga olinmaydi; shablonda kalit boshqa savol raqami yoki harfi bilan yozilsa (`38` so'ralganda `39-...`, `40a` so'ralganda `b)...`), bot buni aytib, qayta so'raydi.
 
 Ochiq javoblar solishtirilganda katta-kichik harf va bo'shliqlar e'tiborga olinmaydi, sonlar qiymati bo'yicha tekshiriladi (`0,5` = `0.5` = `1/2`), kirill klaviaturada terilgan o'xshash harflar lotinga o'giriladi.
 
