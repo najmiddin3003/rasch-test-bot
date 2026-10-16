@@ -21,9 +21,16 @@ export function mainMenu(isAdmin) {
 
 export const cancelMenu = new Keyboard().text(BTN.cancel).resized();
 
-export const newTestConfirmKb = new InlineKeyboard()
-  .text('✅ Saqlash', 'nt:save')
-  .text('❌ Bekor qilish', 'nt:cancel');
+/**
+ * Yangi testni saqlash. Yozma kalit bo'lsa — uni qayta kiritish tugmasi ham:
+ * shablonda oxirgi savol qayta so'raladi, erkin formatda butun yozma kalit.
+ */
+export function newTestConfirmKb(format, hasOpen) {
+  const kb = new InlineKeyboard().text('✅ Saqlash', 'nt:save').text('❌ Bekor qilish', 'nt:cancel');
+  if (!hasOpen) return kb;
+  const label = format === 'ona_tili' ? '↩️ Oxirgi yozma kalitni qayta yozish' : '↩️ Yozma kalitni qayta yuborish';
+  return kb.row().text(label, 'nt:editopen');
+}
 
 export const noClosedKb = new InlineKeyboard().text("Yopiq savol yo'q", 'nt:noclosed');
 export const noOpenKb = new InlineKeyboard().text("Ochiq savol yo'q", 'nt:noopen');

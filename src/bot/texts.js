@@ -1,4 +1,4 @@
-import { hasOldSeparator } from '../lib/answers.js';
+import { hasOldSeparator, keyToInput } from '../lib/answers.js';
 import { escapeHtml, formatClosedBlock, formatDate, formatKey, formatNumber, formatOpenBlock } from '../lib/format.js';
 import { ESSAY_MAX, formatTitle, optionsSummary, questionName } from '../lib/formats.js';
 import { GRADES, MAX_T, PASS_MIN } from '../lib/scoring.js';
@@ -10,7 +10,8 @@ export const KEY_VARIANTS_NOTE =
   "• Bir nechta to'g'ri javob bo'lsa, vergul bilan ajrating: <code>o'g'il, bola</code>\n" +
   "• Javobning o'zi vergul bo'lsa, uni boshida yozing: <code>,</code> — vergul; <code>,,;</code> — vergul " +
   'yoki nuqtali vergul (birinchi vergul — javob, ikkinchisi — ajratuvchi).\n' +
-  "• Raqamlar orasidagi vergul — o'nli kasr: <code>0,5</code> bitta javob.\n";
+  "• Raqamlar orasidagi va qavs ichidagi vergul ajratuvchi emas: <code>0,5</code>, <code>0,(3)</code>, " +
+  '<code>(2, 3)</code> — har biri bitta javob.\n';
 
 /** Yakuniy ball: esseli testda (test + esse) / 2, aks holda Rasch T-ball */
 export const scoreOf = (s) => s.totalScore ?? s.tScore;
@@ -287,7 +288,7 @@ export function oldSeparatorNote(items) {
   const labels = items.filter((it) => hasOldSeparator(it.key)).map((it) => it.label);
   if (!labels.length) return '';
   return (
-    `\n⚠️ <b>${labelList(labels)}</b>: «;» endi ajratuvchi emas — javob bitta deb olindi. ` +
+    `\n⚠️ <b>${labelList(labels)}</b>: «;» va «|» ajratuvchi emas — javob bitta deb olindi. ` +
     "Bir nechta to'g'ri javob bo'lsa, vergul bilan yozing.\n"
   );
 }
@@ -374,10 +375,16 @@ export function fixKeyPrompt(test, suggestions = []) {
     "\nBarcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi.";
   if (suggestions.length) {
     const lines = [];
+    const manual = [];
     let size = 0;
     for (const s of suggestions) {
-      // Nusxalab yuboriladi — parseKeyFixes xuddi shu variantlarni qaytaradi
-      const line = `${s.label}=${s.key.join(', ')}`;
+      // Nusxalab yuboriladi: parseKeyFixes xuddi shu variantlarni qaytarmasa — qatorga qo'yilmaydi
+      const input = keyToInput(s.key);
+      if (input === null) {
+        manual.push(s.label);
+        continue;
+      }
+      const line = `${s.label}=${input}`;
       if (size + line.length > 1500) {
         lines.push('...');
         break;
@@ -387,9 +394,20 @@ export function fixKeyPrompt(test, suggestions = []) {
     }
     head +=
       "\n\n🤖 <b>Bot taklifi</b> — kalit surilganga o'xshaydi: o'quvchilarning ko'pi bu savollarga qo'shni " +
-      `savol javobini yozgan:\n<code>${escapeHtml(lines.join('\n'))}</code>\n` +
-      "To'g'ri bo'lsa, nusxalab yuboring. Surilish boshlangan va tugagan joydagi savollarni (masalan, tushib " +
-      "qolgan javobni) o'zingiz qo'shing.";
+      'savol javobini yozgan';
+    if (lines.length) {
+      head +=
+        `:\n<code>${escapeHtml(lines.join('\n'))}</code>\n` +
+        "To'g'ri bo'lsa, nusxalab yuboring. Surilish boshlangan va tugagan joydagi savollarni (masalan, tushib " +
+        "qolgan javobni) o'zingiz qo'shing.";
+    } else {
+      head += '.';
+    }
+    if (manual.length) {
+      head +=
+        `\n⚠️ <b>${labelList(manual)}</b>: qo'shni savol kalitida vergul javobning ichida (eski kalit) — endi vergul ` +
+        "variantlarni ajratadi, shuning uchun bu taklifni nusxalab bo'lmaydi. Kalitni qo'lda tekshiring.";
+    }
   }
   return withFlagged(test, head, '');
 }

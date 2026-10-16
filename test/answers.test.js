@@ -4,6 +4,7 @@ import {
   checkAnswers,
   checkClosedRange,
   hasOldSeparator,
+  keyToInput,
   parseEssay,
   parseSingleKey,
   parseStudentFixes,
@@ -193,6 +194,12 @@ test("kalit variantlari vergul bilan; boshidagi vergul — javobning o'zi", () =
   assert.deepEqual(splitVariants('0,5, 1/2'), ['0,5', '1/2']);
   assert.deepEqual(splitVariants('1, 5'), ['1', '5']);
   assert.deepEqual(splitVariants('a, a'), ['a']);
+  // Qavs ichidagi vergul — nuqta yoki oraliq; davriy kasr
+  assert.deepEqual(splitVariants('(2, 3)'), ['(2, 3)']);
+  assert.deepEqual(splitVariants('[1, 5), (-∞, 2]'), ['[1, 5)', '(-∞, 2]']);
+  assert.deepEqual(splitVariants('(1, 2), (2, 1)'), ['(1, 2)', '(2, 1)']);
+  assert.deepEqual(splitVariants('0,(3), 1/3'), ['0,(3)', '1/3']);
+  assert.deepEqual(splitVariants('( , ;'), ['(', ';'], 'yopilmagan qavs — tinish belgisi');
 });
 
 test('shablon kaliti: har bir savol alohida xabarda', () => {
@@ -292,15 +299,21 @@ test("kalit: boshidagi savol raqami va a)/b) olib tashlanadi", () => {
 
 test("bot taklifi (kalit, ', ' bilan) nusxalab yuborilsa, xuddi shu variantlar qaytadi", () => {
   const items = [{ label: '7', kind: 'open' }];
-  for (const key of [[','], [',', ';'], [';', ','], ['tire', ','], [',-'], ['0,5', '1/2'], ["o'g'il", 'bola'], ['-3', '(2;3)']]) {
-    assert.deepEqual(parseKeyFixes(`7=${key.join(', ')}`, items).fixes.get('7'), key, JSON.stringify(key));
+  const keys = [[','], [',', ';'], [';', ','], ['tire', ','], [',-'], ['0,5', '1/2'], ["o'g'il", 'bola'], ['-3', '(2;3)'], ['(2, 3)'], ['0,(3)']];
+  for (const key of keys) {
+    assert.equal(keyToInput(key), key.join(', '));
+    assert.deepEqual(parseKeyFixes(`7=${keyToInput(key)}`, items).fixes.get('7'), key, JSON.stringify(key));
   }
+  // Eski kalit: vergul javobning ichida — nusxalab bo'lmaydi
+  for (const key of [['da,ga'], ['kibrli, manman'], ['k;']]) assert.equal(keyToInput(key), null, JSON.stringify(key));
 });
 
 test("kalitda «;» qolsa (eski odat) — ogohlantirish, qavsli javob bundan mustasno", () => {
   for (const k of ['0.5;1/2', "o'g'il;bola", 'a ; b', '-3;-4']) assert.ok(hasOldSeparator([k]), k);
-  for (const k of [';', ',;', '(2;3)', '[1;5)', 'k']) assert.ok(!hasOldSeparator([k]), k);
+  for (const k of [';', ',;', '(2;3)', '[1;5)', 'k', '(-inf;2)U(3;inf)', '|x-1|', '|x| + |y|']) assert.ok(!hasOldSeparator([k]), k);
   assert.ok(!hasOldSeparator([',', ';']));
+  // «;» qavs tashqarisida — ogohlantiriladi; «|» — kalit ko'rinishidan nusxalangan
+  for (const k of ['x(1-x);x-x^2', '(1,2);(2,1)', '0.5 | 1/2']) assert.ok(hasOldSeparator([k]), k);
 });
 
 test("raqam olib tashlash javobning o'zini buzmaydi", () => {

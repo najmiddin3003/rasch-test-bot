@@ -176,7 +176,7 @@ async function goToConfirm(ctx, data) {
     });
   }
   await setState(ctx, 'nt_confirm', data);
-  return ctx.reply(newTestPreview(data), { ...HTML, reply_markup: newTestConfirmKb });
+  return ctx.reply(newTestPreview(data), { ...HTML, reply_markup: newTestConfirmKb(data.format, data.openItems.length > 0) });
 }
 
 export async function startNewTest(ctx) {
@@ -492,6 +492,23 @@ export function registerAdmin(bot) {
     step(['nt_open'], (ctx, data) => {
       const items = data.openItems || [];
       if (data.format !== 'ona_tili' || !items.length || ctx.callbackQuery.message?.message_id !== data.promptId) return;
+      const removed = items.at(-1);
+      return askOpenKey(
+        ctx,
+        { ...data, openItems: items.slice(0, -1) },
+        `↩️ ${questionName(removed.label)} kaliti (${keyVariantsText(removed.key)}) o'chirildi — qayta yuboring.\n\n`,
+      );
+    }),
+  );
+
+  // Ko'rib chiqishda: shablonda oxirgi yozma kalit qayta so'raladi, erkin formatda — butun yozma kalit
+  bot.callbackQuery(
+    'nt:editopen',
+    adminOnly,
+    step(['nt_confirm'], (ctx, data) => {
+      const items = data.openItems || [];
+      if (!items.length) return;
+      if (data.format !== 'ona_tili') return goToOpenStep(ctx, { ...data, openItems: [] });
       const removed = items.at(-1);
       return askOpenKey(
         ctx,

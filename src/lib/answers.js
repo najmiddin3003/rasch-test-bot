@@ -5,18 +5,37 @@ import { ESSAY_MAX, itemOptions, optionLetters, optionRange, questionName } from
 export const MAX_OPEN_ANSWER = 300;
 
 /**
+ * Har bir belgi nechta juft qavs ichida turgani: "(2, 3)" dagi vergul — 1. Yopilmagan qavs hisobga olinmaydi
+ * (tinish belgisi so'ralgan savolda "(" yoki ")" javobning o'zi bo'lishi mumkin).
+ */
+function bracketDepth(s) {
+  const depth = new Array(s.length).fill(0);
+  const open = [];
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(' || s[i] === '[') open.push(i);
+    else if ((s[i] === ')' || s[i] === ']') && open.length) {
+      for (let j = open.pop() + 1; j < i; j++) depth[j]++;
+    }
+  }
+  return depth;
+}
+
+/**
  * Bitta savol kalitidagi to'g'ri javob variantlari — vergul bilan ajratiladi: "o'g'il, bola".
  * Variant boshidagi vergul — javobning o'zi (tinish belgisi so'ralgan savol): "," → [","],
  * ",,;" → [",", ";"] (birinchi vergul — javob, ikkinchisi — ajratuvchi), ",-" → [",-"].
- * Raqamlar orasidagi vergul — o'nli kasr: "0,5" bitta javob.
+ * Ajratuvchi emas: raqamlar orasidagi vergul — o'nli kasr ("0,5", davriy "0,(3)"); qavs ichidagi vergul —
+ * nuqta yoki oraliq ("(2, 3)", "[1, 5)").
  */
 export function splitVariants(text) {
   const s = String(text);
+  const depth = bracketDepth(s);
   const variants = [];
   let cur = '';
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    const isSeparator = ch === ',' && cur.trim() && !(/\d$/.test(cur) && /\d/.test(s[i + 1] ?? ''));
+    const decimal = /\d$/.test(cur) && /^\(?\d/.test(s.slice(i + 1));
+    const isSeparator = ch === ',' && cur.trim() && !decimal && !depth[i];
     if (!isSeparator) {
       cur += ch;
       continue;
@@ -213,11 +232,32 @@ function keyVariants(text) {
 }
 
 /**
- * Variant ichida ";" qolgan: "0.5;1/2", "o'g'il;bola" — muqobillar avval ";" bilan ajratilardi, endi bu
- * bitta javob. Qavsli javob ("(2;3)", "[1;5)" — nuqta, oraliq) bundan mustasno.
+ * Variant ichida ajratuvchiga o'xshash belgi qolgan — javob bitta deb olinadi, admin ogohlantiriladi:
+ * ";" — muqobillar avval shu bilan ajratilardi ("0.5;1/2", "o'g'il;bola"); " | " — kalit ko'rinishidan
+ * nusxalangan ("0.5 | 1/2"). Qavs ichidagisi ("(2;3)", "[1;5)" — nuqta, oraliq) va "|x-1|" bundan mustasno.
  */
 export function hasOldSeparator(key) {
-  return key.some((k) => !/[()[\]]/.test(k) && /[^\s;,]\s*;\s*[^\s;,]/.test(k));
+  return key.some((k) => {
+    const depth = bracketDepth(k);
+    for (let i = 0; i < k.length; i++) {
+      if (depth[i]) continue;
+      const before = k.slice(0, i);
+      const after = k.slice(i + 1);
+      if (k[i] === ';' && /[^\s;,]\s*$/.test(before) && /^\s*[^\s;,]/.test(after)) return true;
+      if (k[i] === '|' && /\S\s+$/.test(before) && /^\s+\S/.test(after)) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Kalit kiritish ko'rinishida ("o'g'il, bola") — «Kalitni tuzatish» dagi bot taklifi uchun. Qayta o'qilganda
+ * boshqa variantlar chiqsa (eski kalit: vergul javobning ichida, masalan "da,ga") — null.
+ */
+export function keyToInput(key) {
+  const text = key.join(', ');
+  const back = keyVariants(text);
+  return back.length === key.length && back.every((k, i) => k === key[i]) ? text : null;
 }
 
 function splitLines(text) {
