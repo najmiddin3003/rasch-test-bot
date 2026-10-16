@@ -33,6 +33,11 @@ export function formatClosedBlock(letters) {
   return lines.join('\n');
 }
 
+/** Yozma savol kaliti variantlari ko'rinishi: "o'g'il | bola" (vergul variantning o'zi bo'lishi mumkin) */
+export function formatKey(key) {
+  return key.join(' | ');
+}
+
 export function formatOpenBlock(labels, values) {
   return labels.map((l, i) => `<code>${l}:</code> ${escapeHtml(values[i] || '–')}`).join('\n');
 }

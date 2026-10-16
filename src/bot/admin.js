@@ -2,8 +2,8 @@ import { InlineKeyboard, InputFile } from 'grammy';
 import { Test } from '../models/Test.js';
 import { Submission } from '../models/Submission.js';
 import { config } from '../config.js';
-import { checkClosedRange, parseClosed, parseKeyFixes, parseOpenKey, parseSingleKey } from '../lib/answers.js';
-import { escapeHtml, formatClosedBlock } from '../lib/format.js';
+import { checkClosedRange, hasOldSeparator, parseClosed, parseKeyFixes, parseOpenKey, parseSingleKey } from '../lib/answers.js';
+import { escapeHtml, formatClosedBlock, formatKey } from '../lib/format.js';
 import { FORMATS, formatTitle, optionRange, optionsSummary, questionName } from '../lib/formats.js';
 import { detectKeyShift } from '../lib/keyShift.js';
 import { runInBackground } from '../lib/background.js';
@@ -35,7 +35,17 @@ import {
   optionsCountKb,
   testCardKb,
 } from './keyboards.js';
-import { HTML, adminCloseSummary, fitOpenBlock, fixKeyPrompt, keyText, studentResult, testSummary } from './texts.js';
+import {
+  HTML,
+  KEY_VARIANTS_NOTE,
+  adminCloseSummary,
+  fitOpenBlock,
+  fixKeyPrompt,
+  keyText,
+  oldSeparatorNote,
+  studentResult,
+  testSummary,
+} from './texts.js';
 import { replyWithMenu, resetState, safeEdit, setState, sleep } from './helpers.js';
 
 // Telegram xabari 4096 belgidan oshmasligi uchun (ko'rib chiqish va kalit xabarlari)
@@ -84,10 +94,7 @@ function openKeyPrompt(data) {
     return (
       `3️⃣ <b>Yozma savollar kaliti</b> — ${FORMATS.ona_tili.openLabels.length} ta savol. Bot ularni bittalab ` +
       "so'raydi, har bir javobni <b>alohida xabarda</b> yuboring.\n\n" +
-      "• Bir nechta to'g'ri javob bo'lsa, vergul bilan ajrating: <code>o'g'il, bola</code>\n" +
-      "• Javobning o'zi vergul bo'lsa, uni boshida yozing: <code>,</code> — vergul; <code>,,;</code> — vergul " +
-      'yoki nuqtali vergul (birinchi vergul — javob, ikkinchisi — ajratuvchi).\n' +
-      "• Raqamlar orasidagi vergul — o'nli kasr: <code>0,5</code> bitta javob.\n" +
+      KEY_VARIANTS_NOTE +
       "• Boshidagi <code>36-</code>, <code>40-a)</code>, <code>b)</code> kabi raqamlar javobga qo'shilmaydi.\n" +
       ANSWER_NOTE
     );
@@ -95,8 +102,8 @@ function openKeyPrompt(data) {
   const next = data.closedKey.length + 1;
   return (
     `3️⃣ <b>Yozma savollar kalitini</b> yuboring — har qatorda bitta savol:\n` +
-    `<code>${next}a=12\n${next}b=-3\n${next + 1}=0.5;1/2</code>\n\n` +
-    `• Bir nechta to'g'ri javob bo'lsa <code>;</code> bilan ajrating.\n` +
+    `<code>${next}a=12\n${next}b=-3\n${next + 1}=0.5, 1/2</code>\n\n` +
+    KEY_VARIANTS_NOTE +
     `• Raqamsiz yozsangiz (faqat javoblar), ${next} dan boshlab raqamlanadi.\n` +
     `• Sonlar qiymati bo'yicha solishtiriladi: 0.5 = 1/2 = 0,5.\n` +
     `${ANSWER_NOTE}\n\n` +
@@ -114,13 +121,15 @@ function newTestPreview(data) {
   head += data.hasEssay ? ' + esse\n' : '\n';
   if (closed.length) head += `\n<b>Yopiq kalit</b> — ${optionsSummary(pseudo)}:\n${formatClosedBlock(closed)}\n`;
   const tail =
-    `\n<b>Esse:</b> ${data.hasEssay ? "bor — o'quvchi oxirida esse balini (0–75) kiritadi" : "yo'q"}\n` + '\nSaqlaysizmi?';
+    `\n<b>Esse:</b> ${data.hasEssay ? "bor — o'quvchi oxirida esse balini (0–75) kiritadi" : "yo'q"}\n` +
+    oldSeparatorNote(open) +
+    '\nSaqlaysizmi?';
   if (!open.length) return head + tail;
   return fitOpenBlock(
     head,
     '\n<b>Yozma kalit:</b>',
     open.map((o) => o.label),
-    open.map((o) => o.key.join(' ; ')),
+    open.map((o) => formatKey(o.key)),
     tail,
   );
 }
@@ -242,7 +251,11 @@ export async function handleAdminText(ctx, text) {
     if (openItems.length) await ctx.api.editMessageReplyMarkup(ctx.chat.id, data.promptId).catch(() => {});
     const next = { ...data, openItems: [...openItems, { label, key: parsed.key }] };
     if (next.openItems.length < labels.length) {
-      await askOpenKey(ctx, next, `✅ ${questionName(label)}: ${keyVariantsText(parsed.key)}\n\n`);
+      const warn = hasOldSeparator(parsed.key)
+        ? "⚠️ «;» endi ajratuvchi emas — javob bitta deb olindi. Bir nechta to'g'ri javob bo'lsa, vergul " +
+          'bilan yozing (↩️ tugmasi bilan qayta yozish mumkin).\n'
+        : '';
+      await askOpenKey(ctx, next, `✅ ${questionName(label)}: ${keyVariantsText(parsed.key)}\n${warn}\n`);
     } else {
       await goToEssayStep(ctx, next);
     }
@@ -286,7 +299,8 @@ export async function handleAdminText(ctx, text) {
       await replyWithMenu(ctx, "Test holati o'zgargan, kalit tuzatilmadi.");
       return true;
     }
-    await replyWithMenu(ctx, `✅ Kalit tuzatildi: ${[...parsed.fixes.keys()].join(', ')}`);
+    const fixed = [...parsed.fixes].map(([label, key]) => ({ label, key }));
+    await replyWithMenu(ctx, `✅ Kalit tuzatildi: ${fixed.map((f) => f.label).join(', ')}${oldSeparatorNote(fixed)}`);
     await ctx.reply(adminCloseSummary(result.test, result.submissions), HTML);
     if (result.submissions.length) await sendReport(ctx, result.test, result.submissions);
     await showTestCard(ctx, result.test, false);

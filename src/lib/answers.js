@@ -5,18 +5,6 @@ import { ESSAY_MAX, itemOptions, optionLetters, optionRange, questionName } from
 export const MAX_OPEN_ANSWER = 300;
 
 /**
- * Kalitdagi muqobil javoblar ";" bilan ajratiladi. Javobning o'zi nuqtali vergul bo'lsa
- * (masalan, tinish belgisi so'ralgan savol), qatorga faqat ";" yoziladi.
- */
-function splitKeys(rhs) {
-  if (String(rhs).trim() === ';') return [';'];
-  return String(rhs)
-    .split(';')
-    .map((k) => k.trim())
-    .filter(Boolean);
-}
-
-/**
  * Bitta savol kalitidagi to'g'ri javob variantlari — vergul bilan ajratiladi: "o'g'il, bola".
  * Variant boshidagi vergul — javobning o'zi (tinish belgisi so'ralgan savol): "," → [","],
  * ",,;" → [",", ";"] (birinchi vergul — javob, ikkinchisi — ajratuvchi), ",-" → [",-"].
@@ -219,6 +207,19 @@ function stripTrailingSeparators(s) {
   return /[\p{L}\p{N}]/u.test(s) ? s.replace(/[;,]+$/, '').trim() : s;
 }
 
+/** Kalit qatoridagi to'g'ri javob variantlari (splitVariants); oxiridagi ortiqcha ";" tashlanadi: "k;" → "k" */
+function keyVariants(text) {
+  return [...new Set(splitVariants(text).map(stripTrailingSeparators).filter(Boolean))];
+}
+
+/**
+ * Variant ichida ";" qolgan: "0.5;1/2", "o'g'il;bola" — muqobillar avval ";" bilan ajratilardi, endi bu
+ * bitta javob. Qavsli javob ("(2;3)", "[1;5)" — nuqta, oraliq) bundan mustasno.
+ */
+export function hasOldSeparator(key) {
+  return key.some((k) => !/[()[\]]/.test(k) && /[^\s;,]\s*;\s*[^\s;,]/.test(k));
+}
+
 function splitLines(text) {
   return String(text)
     .split(/\r?\n/)
@@ -228,7 +229,7 @@ function splitLines(text) {
 
 /**
  * Admin uchun: ochiq savollar kalitini o'qish.
- * Har qatorda bitta savol: "36a=12" yoki "36a) 12"; muqobil javoblar ";" bilan: "37=0.5;1/2".
+ * Har qatorda bitta savol: "36a=12" yoki "36a) 12"; muqobil javoblar vergul bilan: "37=0.5, 1/2" (keyVariants).
  * Raqamsiz qatorlar yopiq savollardan keyingi raqamlar bilan nomlanadi.
  */
 export function parseOpenKey(text, closedCount) {
@@ -248,7 +249,7 @@ export function parseOpenKey(text, closedCount) {
     const label = m ? normalizeLabel(m[1]) : String(closedCount + idx + 1);
     // Raqamsiz qator boshidagi savol raqami/harfi olib tashlanadi. Erkin formatda javob ham raqam
     // bilan boshlanishi mumkin ("7-sinf") — qator boshqa savol raqami bilan boshlansa ham xato emas.
-    const keys = m ? splitKeys(m[2]) : splitKeys(lines[idx]).map((k) => stripLabelPrefix(k, label)).filter(Boolean);
+    const keys = keyVariants(m ? m[2] : stripLabelPrefix(lines[idx], label, { trailing: false }));
     if (!keys.length) return { ok: false, error: `${label}-savol uchun javob yozilmagan.` };
     if (seen.has(label)) return { ok: false, error: `${label}-savol ikki marta yozilgan.` };
     if (parseInt(label, 10) <= closedCount) {
@@ -300,7 +301,7 @@ export function parseOpenAnswers(text, labels) {
 
 /**
  * Admin uchun: e'lon qilinmagan testda kalitni tuzatish. Har qatorda bitta savol:
- * "7=c" (yopiq) yoki "31a=12;12.0" (ochiq, muqobil javoblar ";" bilan).
+ * "7=c" (yopiq) yoki "31a=12, 12.0" (ochiq, muqobil javoblar vergul bilan — keyVariants).
  * @param {{label: string, kind: string}[]} items testdagi savollar
  * @returns {{ ok: true, fixes: Map<string, string[]> } | { ok: false, error: string }}
  */
@@ -324,7 +325,7 @@ export function parseKeyFixes(text, items) {
       }
       fixes.set(label, [letter]);
     } else {
-      const keys = splitKeys(m[2]);
+      const keys = keyVariants(m[2]);
       if (!keys.length) return { ok: false, error: `${label}-savol uchun javob yozilmagan.` };
       fixes.set(label, keys);
     }
@@ -384,8 +385,7 @@ export function parseSingleKey(text, label, labels) {
   if (other && other !== num && labels.some((l) => l.match(/^\d+/)[0] === other)) return wrong(other);
   const letter = sub && body.replace(new RegExp(`^${num}${NUMBER_PREFIX}`), '').match(/^([a-f])\s*\)/i)?.[1].toLowerCase();
   if (letter && letter !== sub) return wrong(num + letter);
-  const variants = splitVariants(stripLabelPrefix(body, label, { trailing: false })).map(stripTrailingSeparators);
-  const key = [...new Set(variants.filter(Boolean))];
+  const key = keyVariants(stripLabelPrefix(body, label, { trailing: false }));
   if (!key.length) return { ok: false, error: 'Javob yozilmagan.' };
   return { ok: true, key };
 }
