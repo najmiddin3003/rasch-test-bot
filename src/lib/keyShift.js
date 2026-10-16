@@ -2,6 +2,7 @@
 // bo'lib yuborsa yoki bittasini tushirib qoldirsa, undan keyingi javoblar qo'shni savolga o'tadi:
 // o'quvchilarning i-savolga javoblari kalitdagi (i ± 1)-savol javobiga mos keladi.
 import { isOpenCorrect, normalizeOpen } from './answers.js';
+import { formatKey } from './format.js';
 
 const MIN_PERSONS = 5;
 // Yozma javob tasodifan boshqa savol kalitiga mos kelishi juda kam — bitta savolning o'zi dalil
@@ -71,7 +72,7 @@ const shorten = (s, limit) => (s.length > limit ? `${s.slice(0, limit - 1)}…` 
 /** Savol izohi: qaysi qo'shni savol kaliti nechta o'quvchining javobiga mos kelgani */
 export function keyShiftFlag(neighbor, matches) {
   const key =
-    neighbor.kind === 'closed' ? neighbor.key[0].toUpperCase() : `«${shorten(neighbor.key.join(' ; '), 30)}»`;
+    neighbor.kind === 'closed' ? neighbor.key[0].toUpperCase() : `«${shorten(formatKey(neighbor.key), 30)}»`;
   const verb = neighbor.kind === 'closed' ? 'belgilagan' : 'yozgan';
   return `Kalit surilganga o'xshaydi: ${matches} kishi ${neighbor.label}-savol kalitini (${key}) ${verb}`;
 }

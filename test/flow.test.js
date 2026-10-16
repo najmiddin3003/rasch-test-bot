@@ -192,8 +192,19 @@ test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, y
   // Savol tashlab ketilsa — keyingi savol raqami bilan yozilgan javob qabul qilinmaydi
   await message(ADMIN, OPEN_KEY[1]);
   assert.match(lastText(ADMIN), /36-savol kaliti so'ralmoqda, siz esa 37-savol uchun/);
-  for (const line of OPEN_KEY) await message(ADMIN, line);
+  for (const line of OPEN_KEY.slice(0, -1)) await message(ADMIN, line);
+  // Oxirgi kalit «;» bilan (eski odat) — ko'rib chiqishda ogohlantiriladi va qayta yozish mumkin
+  await message(ADMIN, '44b=.;!');
+  assert.match(lastText(ADMIN), /Esse:<\/b> bor[\s\S]*⚠️ <b>44b<\/b>: «;» va «\|» ajratuvchi emas/);
+  await callback(ADMIN, 'nt:editopen');
+  assert.match(lastText(ADMIN), /44-savol \(b\) kaliti \(<code>\.;!<\/code>\) o'chirildi[\s\S]*\(14\/14\)/);
+  // Juda uzun kalit ham qayta so'raladi (xabar qisqartiriladi, Telegram rad etmaydi)
+  await message(ADMIN, `44b=${'a'.repeat(4050)}`);
+  await callback(ADMIN, 'nt:editopen');
+  assert.match(lastText(ADMIN), /<code>a{59}…<\/code>\) o'chirildi[\s\S]*\(14\/14\)/);
+  await message(ADMIN, OPEN_KEY.at(-1));
   assert.match(lastText(ADMIN), /Esse:<\/b> bor/);
+  assert.doesNotMatch(lastText(ADMIN), /ajratuvchi emas/);
   await callback(ADMIN, 'nt:save');
 
   const created = await models.Test.findOne({ name: 'Ona tili sinov' });
@@ -369,9 +380,19 @@ test('Erkin format: 5 variantli tugmalar, essesiz', { skip, timeout: 300000 }, a
   await callback(ADMIN, 'nt:fmt:free');
   await callback(ADMIN, 'nt:opt:5');
   await message(ADMIN, 'abcde');
+  await message(ADMIN, '6=0.5;1/2');
+  await callback(ADMIN, 'nt:essay:0');
+  assert.match(lastText(ADMIN), /⚠️ <b>6<\/b>: «;» va «\|» ajratuvchi emas/);
+  const stalePreview = findButtonMessage(ADMIN, 'nt:editopen');
+  await callback(ADMIN, 'nt:editopen');
+  assert.match(lastText(ADMIN), /Yozma savollar kalitini<\/b> yuboring/);
   await message(ADMIN, '6=Toshkent');
   await callback(ADMIN, 'nt:essay:0');
   assert.match(lastText(ADMIN), /Esse:<\/b> yo'q/);
+  // Eski ko'rib chiqishdagi «↩️» tugmasi yangi kalitni o'chirmaydi
+  await callback(ADMIN, 'nt:editopen', stalePreview);
+  assert.equal((await userState(ADMIN)).state, 'nt_confirm');
+  assert.deepEqual((await userState(ADMIN)).stateData.openItems, [{ label: '6', key: ['Toshkent'] }]);
   await callback(ADMIN, 'nt:save');
   const t = await models.Test.findOne({ name: 'Erkin sinov' });
   assert.equal(t.format, 'free');

@@ -1,8 +1,17 @@
-import { escapeHtml, formatClosedBlock, formatDate, formatNumber, formatOpenBlock } from '../lib/format.js';
+import { hasOldSeparator, keyToInput } from '../lib/answers.js';
+import { escapeHtml, formatClosedBlock, formatDate, formatKey, formatNumber, formatOpenBlock } from '../lib/format.js';
 import { ESSAY_MAX, formatTitle, optionsSummary, questionName } from '../lib/formats.js';
 import { GRADES, MAX_T, PASS_MIN } from '../lib/scoring.js';
 
 export const HTML = { parse_mode: 'HTML' };
+
+/** Kalitda bir nechta to'g'ri javob qanday yoziladi (yangi test va «Kalitni tuzatish») */
+export const KEY_VARIANTS_NOTE =
+  "• Bir nechta to'g'ri javob bo'lsa, vergul bilan ajrating: <code>o'g'il, bola</code>\n" +
+  "• Javobning o'zi vergul bo'lsa, uni boshida yozing: <code>,</code> — vergul; <code>,,;</code> — vergul " +
+  'yoki nuqtali vergul (birinchi vergul — javob, ikkinchisi — ajratuvchi).\n' +
+  "• Raqamlar orasidagi va qavs ichidagi vergul ajratuvchi emas: <code>0,5</code>, <code>0,(3)</code>, " +
+  '<code>(2, 3)</code> — har biri bitta javob.\n';
 
 /** Yakuniy ball: esseli testda (test + esse) / 2, aks holda Rasch T-ball */
 export const scoreOf = (s) => s.totalScore ?? s.tScore;
@@ -104,7 +113,7 @@ export function keyText(test) {
     head,
     `\n<b>Yozma (${open.length}):</b>`,
     open.map((i) => i.label),
-    open.map((i) => i.key.join(' ; ')),
+    open.map((i) => formatKey(i.key)),
     tail,
   );
 }
@@ -252,7 +261,7 @@ export function flaggedItemsText(test, maxLines = 15) {
   const flagged = test.items.filter((i) => i.flag);
   if (!flagged.length) return '';
   const lines = flagged.slice(0, maxLines).map((i) => {
-    const key = i.kind === 'closed' ? i.key[0].toUpperCase() : shorten(i.key.join(' ; '), 40);
+    const key = i.kind === 'closed' ? i.key[0].toUpperCase() : shorten(formatKey(i.key), 40);
     return `• <b>${i.label}</b> (kalit: ${escapeHtml(key)}, to'g'ri: ${i.correctCount}) — ${escapeHtml(i.flag)}`;
   });
   if (flagged.length > maxLines) lines.push(`... yana ${flagged.length - maxLines} ta (Excel faylda)`);
@@ -270,6 +279,19 @@ function withFlagged(test, head, tail) {
 
 const labelList = (labels, max = 10) =>
   labels.slice(0, max).join(', ') + (labels.length > max ? ` va yana ${labels.length - max} ta` : '');
+
+/**
+ * Kalitda «;» qolgan savollar haqida ogohlantirish (muqobillar avval «;» bilan ajratilardi — eski odat).
+ * @param {{ label: string, key: string[] }[]} items yozma savollar kaliti
+ */
+export function oldSeparatorNote(items) {
+  const labels = items.filter((it) => hasOldSeparator(it.key)).map((it) => it.label);
+  if (!labels.length) return '';
+  return (
+    `\n⚠️ <b>${labelList(labels)}</b>: «;» va «|» ajratuvchi emas — javob bitta deb olindi. ` +
+    "Bir nechta to'g'ri javob bo'lsa, vergul bilan yozing.\n"
+  );
+}
 
 export function adminCloseSummary(test, submissions) {
   const n = submissions.length;
@@ -348,13 +370,21 @@ export function fixKeyPrompt(test, suggestions = []) {
   }
   head +=
     'Tuzatiladigan savollarni yuboring — har qatorda bitta:\n' +
-    '<code>7=c\n37=javob;muqobil javob</code>\n\n' +
-    "Barcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi.";
+    '<code>7=c\n37=javob, muqobil javob</code>\n\n' +
+    KEY_VARIANTS_NOTE +
+    "\nBarcha javoblar yangi kalit bo'yicha qayta tekshiriladi va Rasch qayta hisoblanadi.";
   if (suggestions.length) {
     const lines = [];
+    const manual = [];
     let size = 0;
     for (const s of suggestions) {
-      const line = `${s.label}=${s.key.join(';')}`;
+      // Nusxalab yuboriladi: parseKeyFixes xuddi shu variantlarni qaytarmasa — qatorga qo'yilmaydi
+      const input = keyToInput(s.key);
+      if (input === null) {
+        manual.push(s.label);
+        continue;
+      }
+      const line = `${s.label}=${input}`;
       if (size + line.length > 1500) {
         lines.push('...');
         break;
@@ -364,9 +394,20 @@ export function fixKeyPrompt(test, suggestions = []) {
     }
     head +=
       "\n\n🤖 <b>Bot taklifi</b> — kalit surilganga o'xshaydi: o'quvchilarning ko'pi bu savollarga qo'shni " +
-      `savol javobini yozgan:\n<code>${escapeHtml(lines.join('\n'))}</code>\n` +
-      "To'g'ri bo'lsa, nusxalab yuboring. Surilish boshlangan va tugagan joydagi savollarni (masalan, tushib " +
-      "qolgan javobni) o'zingiz qo'shing.";
+      'savol javobini yozgan';
+    if (lines.length) {
+      head +=
+        `:\n<code>${escapeHtml(lines.join('\n'))}</code>\n` +
+        "To'g'ri bo'lsa, nusxalab yuboring. Surilish boshlangan va tugagan joydagi savollarni (masalan, tushib " +
+        "qolgan javobni) o'zingiz qo'shing.";
+    } else {
+      head += '.';
+    }
+    if (manual.length) {
+      head +=
+        `\n⚠️ <b>${labelList(manual)}</b>: qo'shni savol kalitida vergul javobning ichida (eski kalit) — endi vergul ` +
+        "variantlarni ajratadi, shuning uchun bu taklifni nusxalab bo'lmaydi. Kalitni qo'lda tekshiring.";
+    }
   }
   return withFlagged(test, head, '');
 }

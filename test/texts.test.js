@@ -118,6 +118,21 @@ test("natija xabari: esseli testda test bali, esse va umumiy ball ko'rsatiladi",
   assert.match(skipped, /Esse bali: <b>0 \(kiritilmagan\)<\/b>/);
 });
 
+test("kalitni tuzatish: bot taklifi kiritish ko'rinishida, eski (vergulli) kalit — qo'lda", () => {
+  const t = { name: 'T', code: '1', items: [], publishedAt: null };
+  const text = fixKeyPrompt(t, [
+    { label: '37', key: ["o'g'il", 'bola'] },
+    { label: '38', key: [',', ';'] },
+    { label: '39', key: ['da,ga'] },
+  ]);
+  assert.match(text, /<code>37=o'g'il, bola\n38=,, ;<\/code>/);
+  assert.match(text, /⚠️ <b>39<\/b>: qo'shni savol kalitida vergul javobning ichida/);
+  const onlyOld = fixKeyPrompt(t, [{ label: '39', key: ['da,ga'] }]);
+  assert.doesNotMatch(onlyOld, /39=|nusxalab yuboring/, "nusxalanadigan qator yo'q");
+  assert.match(onlyOld, /qo'shni savol javobini yozgan\.\n⚠️ <b>39<\/b>/);
+  assertTelegramHtml(text, 'taklif');
+});
+
 test("ishtirokchisiz yopilgan test kartasi: «natijalar yuborilgan» emas", () => {
   const t = { name: 'Bo\'sh', code: '1', items: [{ label: '1', kind: 'closed' }], status: 'closed', closedAt: new Date(), publishedAt: new Date(), createdAt: new Date() };
   assert.match(testSummary(t, 0, 'bot'), /Yopilgan \(.*\), ishtirokchilar bo'lmagan/);

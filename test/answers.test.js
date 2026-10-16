@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   checkAnswers,
   checkClosedRange,
+  hasOldSeparator,
+  keyToInput,
   parseEssay,
   parseSingleKey,
   parseStudentFixes,
@@ -51,19 +53,27 @@ test("o'quvchi javobi: soni tekshiriladi, x — javobsiz", () => {
 });
 
 test('ochiq kalit: raqamli va raqamsiz', () => {
-  const labeled = parseOpenKey('36a=12\n36b) -3\n37 = 0.5;1/2', 35);
+  const labeled = parseOpenKey('36a=12\n36b) -3\n37 = 0.5, 1/2', 35);
   assert.ok(labeled.ok);
   assert.deepEqual(labeled.items, [
     { label: '36a', key: ['12'] },
     { label: '36b', key: ['-3'] },
     { label: '37', key: ['0.5', '1/2'] },
   ]);
-  const plain = parseOpenKey('12\n-3\n1.5', 35);
+  const plain = parseOpenKey('12\n-3\n1.5, 3/2', 35);
   assert.deepEqual(
     plain.items.map((i) => i.label),
     ['36', '37', '38'],
   );
-  assert.deepEqual(plain.items[2].key, ['1.5']);
+  assert.deepEqual(plain.items[2].key, ['1.5', '3/2']);
+  // Vergul qoidalari erkin formatda ham: o'nli kasr, boshidagi vergul, «;» — ajratuvchi emas
+  assert.deepEqual(parseOpenKey('6=0,5, 1/2\n7=,,;\n8=(2;3)\n9=0.5;1/2', 5).items.map((i) => i.key), [
+    ['0,5', '1/2'],
+    [',', ';'],
+    ['(2;3)'],
+    ['0.5;1/2'],
+  ]);
+  assert.deepEqual(parseOpenKey('6-,,;\n7-k;', 5).items.map((i) => i.key), [[',', ';'], ['k']]);
 });
 
 test('ochiq kalit: xatolar', () => {
@@ -110,12 +120,16 @@ test('kalitni tuzatish parseri', () => {
     { label: '7', kind: 'closed' },
     { label: '31a', kind: 'open' },
   ];
-  const ok = parseKeyFixes('7=C\n31а = 12;12.0', items);
+  const ok = parseKeyFixes('7=C\n31а = 12, 12.0', items);
   assert.ok(ok.ok);
   assert.deepEqual([...ok.fixes.entries()], [
     ['7', ['c']],
     ['31a', ['12', '12.0']],
   ]);
+  assert.deepEqual(parseKeyFixes('31a=,,;', items).fixes.get('31a'), [',', ';']);
+  assert.deepEqual(parseKeyFixes('31a=0,5', items).fixes.get('31a'), ['0,5']);
+  assert.deepEqual(parseKeyFixes('31a=12;12.0', items).fixes.get('31a'), ['12;12.0'], '«;» endi ajratuvchi emas');
+  assert.deepEqual(parseKeyFixes('31a=,', items).fixes.get('31a'), [',']);
   assert.match(parseKeyFixes('8=c', items).error, /yo'q/);
   assert.match(parseKeyFixes('7=cd', items).error, /bitta harf/);
   assert.equal(parseKeyFixes('salom', items).ok, false);
@@ -180,6 +194,12 @@ test("kalit variantlari vergul bilan; boshidagi vergul — javobning o'zi", () =
   assert.deepEqual(splitVariants('0,5, 1/2'), ['0,5', '1/2']);
   assert.deepEqual(splitVariants('1, 5'), ['1', '5']);
   assert.deepEqual(splitVariants('a, a'), ['a']);
+  // Qavs ichidagi vergul — nuqta yoki oraliq; davriy kasr
+  assert.deepEqual(splitVariants('(2, 3)'), ['(2, 3)']);
+  assert.deepEqual(splitVariants('[1, 5), (-∞, 2]'), ['[1, 5)', '(-∞, 2]']);
+  assert.deepEqual(splitVariants('(1, 2), (2, 1)'), ['(1, 2)', '(2, 1)']);
+  assert.deepEqual(splitVariants('0,(3), 1/3'), ['0,(3)', '1/3']);
+  assert.deepEqual(splitVariants('( , ;'), ['(', ';'], 'yopilmagan qavs — tinish belgisi');
 });
 
 test('shablon kaliti: har bir savol alohida xabarda', () => {
@@ -275,6 +295,25 @@ test("kalit: boshidagi savol raqami va a)/b) olib tashlanadi", () => {
   // #60548: savol tashlab ketilsa, javob keyingi savol raqami yoki harfi bilan keladi
   assert.match(parseSingleKey('39-javob', '38', ONA_TILI_OPEN).error, /38-savol kaliti so'ralmoqda, siz esa 39-savol/);
   assert.match(parseSingleKey('42-b)istihfom', '42a', ONA_TILI_OPEN).error, /siz esa 42-savol \(b\)/);
+});
+
+test("bot taklifi (kalit, ', ' bilan) nusxalab yuborilsa, xuddi shu variantlar qaytadi", () => {
+  const items = [{ label: '7', kind: 'open' }];
+  const keys = [[','], [',', ';'], [';', ','], ['tire', ','], [',-'], ['0,5', '1/2'], ["o'g'il", 'bola'], ['-3', '(2;3)'], ['(2, 3)'], ['0,(3)']];
+  for (const key of keys) {
+    assert.equal(keyToInput(key), key.join(', '));
+    assert.deepEqual(parseKeyFixes(`7=${keyToInput(key)}`, items).fixes.get('7'), key, JSON.stringify(key));
+  }
+  // Eski kalit: vergul javobning ichida — nusxalab bo'lmaydi
+  for (const key of [['da,ga'], ['kibrli, manman'], ['k;']]) assert.equal(keyToInput(key), null, JSON.stringify(key));
+});
+
+test("kalitda «;» qolsa (eski odat) — ogohlantirish, qavsli javob bundan mustasno", () => {
+  for (const k of ['0.5;1/2', "o'g'il;bola", 'a ; b', '-3;-4']) assert.ok(hasOldSeparator([k]), k);
+  for (const k of [';', ',;', '(2;3)', '[1;5)', 'k', '(-inf;2)U(3;inf)', '|x-1|', '|x| + |y|']) assert.ok(!hasOldSeparator([k]), k);
+  assert.ok(!hasOldSeparator([',', ';']));
+  // «;» qavs tashqarisida — ogohlantiriladi; «|» — kalit ko'rinishidan nusxalangan
+  for (const k of ['x(1-x);x-x^2', '(1,2);(2,1)', '0.5 | 1/2']) assert.ok(hasOldSeparator([k]), k);
 });
 
 test("raqam olib tashlash javobning o'zini buzmaydi", () => {

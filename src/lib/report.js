@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { formatDate } from './format.js';
+import { formatDate, formatKey } from './format.js';
 import { formatTitle, itemOptions, optionRange } from './formats.js';
 
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
@@ -108,7 +108,7 @@ export async function buildExcelReport(test, submissions) {
     const row = itemsSheet.addRow({
       label: item.label,
       kind: item.kind === 'closed' ? `yopiq (${optionRange(itemOptions(item))})` : 'yozma',
-      key: item.kind === 'closed' ? item.key[0].toUpperCase() : item.key.join(' ; '),
+      key: item.kind === 'closed' ? item.key[0].toUpperCase() : formatKey(item.key),
       correct: item.correctCount,
       percent: n ? Math.round((item.correctCount / n) * 1000) / 10 : 0,
       difficulty: item.difficulty,
