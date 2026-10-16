@@ -27,6 +27,7 @@ export const newTestConfirmKb = new InlineKeyboard()
 
 export const noClosedKb = new InlineKeyboard().text("Yopiq savol yo'q", 'nt:noclosed');
 export const noOpenKb = new InlineKeyboard().text("Ochiq savol yo'q", 'nt:noopen');
+export const openKeyBackKb = new InlineKeyboard().text('↩️ Oldingi savolni qayta yozish', 'nt:back');
 
 export const formatKb = new InlineKeyboard()
   .text('📘 Ona tili (Milliy sertifikat)', 'nt:fmt:ona_tili')

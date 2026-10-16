@@ -1,5 +1,5 @@
 // Kalit va javoblarni o'qish (parse) hamda tekshirish.
-import { ESSAY_MAX, itemOptions, optionLetters, optionRange } from './formats.js';
+import { ESSAY_MAX, itemOptions, optionLetters, optionRange, questionName } from './formats.js';
 
 // Yozma javobning maksimal uzunligi (so'z, ibora yoki gap)
 export const MAX_OPEN_ANSWER = 300;
@@ -14,6 +14,30 @@ function splitKeys(rhs) {
     .split(';')
     .map((k) => k.trim())
     .filter(Boolean);
+}
+
+/**
+ * Bitta savol kalitidagi to'g'ri javob variantlari — vergul bilan ajratiladi: "o'g'il, bola".
+ * Variant boshidagi vergul — javobning o'zi (tinish belgisi so'ralgan savol): "," → [","],
+ * ",,;" → [",", ";"] (birinchi vergul — javob, ikkinchisi — ajratuvchi), ",-" → [",-"].
+ * Raqamlar orasidagi vergul — o'nli kasr: "0,5" bitta javob.
+ */
+export function splitVariants(text) {
+  const s = String(text);
+  const variants = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const isSeparator = ch === ',' && cur.trim() && !(/\d$/.test(cur) && /\d/.test(s[i + 1] ?? ''));
+    if (!isSeparator) {
+      cur += ch;
+      continue;
+    }
+    variants.push(cur.trim());
+    cur = '';
+  }
+  if (cur.trim()) variants.push(cur.trim());
+  return [...new Set(variants)];
 }
 
 // Kirill klaviaturada terilgan, lotinga o'xshash harflar
@@ -177,7 +201,7 @@ const NUMBER_PREFIX = String.raw`\s*(?:[=):]|[-.](?!\s*\d))\s*`;
  * "40-a)ta'sir" → "ta'sir", "b)chunki" → "chunki", "43-a)k;" → "k".
  * bare — o'quvchi javobi uchun: "A k" → "k" (harfdan keyin faqat bo'sh joy).
  */
-export function stripLabelPrefix(text, label, { bare = false } = {}) {
+export function stripLabelPrefix(text, label, { bare = false, trailing = true } = {}) {
   let s = String(text).trim();
   const m = String(label).match(/^(\d+)([a-z]?)$/);
   if (!m) return s;
@@ -187,23 +211,12 @@ export function stripLabelPrefix(text, label, { bare = false } = {}) {
     s = s.replace(new RegExp(String.raw`^(?:${num}\s*)?[a-f]u?\s*(?:[).:]|-(?!\s*\d))\s*`, 'i'), '');
     if (bare) s = s.replace(new RegExp(String.raw`^${sub}\s+(?=\S)`, 'i'), '');
   }
-  // "k;" → "k", lekin javobning o'zi tinish belgisi bo'lsa (";" yoki ",") tegilmaydi
-  if (/[\p{L}\p{N}]/u.test(s)) s = s.replace(/[;,]+$/, '').trim();
-  return s;
+  return trailing ? stripTrailingSeparators(s) : s;
 }
 
-/**
- * Tartib bilan yozilgan kalit qatori → muqobil javoblar (savol raqami/harfi olib tashlanadi).
- * Qator boshqa savol raqami bilan boshlansa — tartib buzilgan (qator tushib qolgan yoki ortiqcha).
- * @param {Set<string>} labelNumbers shu kalitdagi savol raqamlari ("36", "40", ...)
- */
-function positionalKey(line, label, labelNumbers) {
-  const own = label.match(/^\d+/)[0];
-  const m = line.match(new RegExp(`^(\\d+)${NUMBER_PREFIX}`));
-  if (m && m[1] !== own && labelNumbers.has(m[1])) {
-    return { error: `${label}-savol o'rnidagi qator "${m[1]}" raqami bilan boshlangan — qatorlar tartibini tekshiring.` };
-  }
-  return { keys: splitKeys(line).map((k) => stripLabelPrefix(k, label)).filter(Boolean) };
+// "k;" → "k", lekin javobning o'zi tinish belgisi bo'lsa (";" yoki ",") tegilmaydi
+function stripTrailingSeparators(s) {
+  return /[\p{L}\p{N}]/u.test(s) ? s.replace(/[;,]+$/, '').trim() : s;
 }
 
 function splitLines(text) {
@@ -230,19 +243,12 @@ export function parseOpenKey(text, closedCount) {
 
   const items = [];
   const seen = new Set();
-  // Erkin formatda javob ham raqam bilan boshlanishi mumkin ("7-sinf") — tartib tekshirilmaydi
-  const positionalNumbers = new Set();
   for (let idx = 0; idx < lines.length; idx++) {
     const m = labeled[idx];
     const label = m ? normalizeLabel(m[1]) : String(closedCount + idx + 1);
-    let keys;
-    if (m) {
-      keys = splitKeys(m[2]);
-    } else {
-      const parsed = positionalKey(lines[idx], label, positionalNumbers);
-      if (parsed.error) return { ok: false, error: parsed.error };
-      keys = parsed.keys;
-    }
+    // Raqamsiz qator boshidagi savol raqami/harfi olib tashlanadi. Erkin formatda javob ham raqam
+    // bilan boshlanishi mumkin ("7-sinf") — qator boshqa savol raqami bilan boshlansa ham xato emas.
+    const keys = m ? splitKeys(m[2]) : splitKeys(lines[idx]).map((k) => stripLabelPrefix(k, label)).filter(Boolean);
     if (!keys.length) return { ok: false, error: `${label}-savol uchun javob yozilmagan.` };
     if (seen.has(label)) return { ok: false, error: `${label}-savol ikki marta yozilgan.` };
     if (parseInt(label, 10) <= closedCount) {
@@ -343,43 +349,45 @@ export function checkClosedRange(answers, options) {
 }
 
 /**
- * Admin uchun: berilgan savollar (shablon) bo'yicha yozma javoblar kaliti.
- * Har qatorda bitta javob tartib bilan yoki "36=javob" / "40a=javob"; muqobillar ";" bilan.
- * Tartib bilan yozilganda qator boshidagi raqam va harf ("36-Qora", "40-a)...", "b)...") olib tashlanadi.
- * @param {string[]} labels kutilgan savollar, masalan ["36", "37", "40a", "40b"]
+ * Admin uchun: bitta yozma savol kaliti — shablonda har bir savol alohida xabarda so'raladi.
+ * To'g'ri javob variantlari vergul bilan ajratiladi (splitVariants); boshidagi savol raqami
+ * va harfi ("36-Qora", "40-a)ta'sir", "b)chunki") olib tashlanadi.
+ * @param {string} label so'ralayotgan savol, masalan "40a"
+ * @param {string[]} labels shablondagi barcha yozma savollar (boshqa savol raqami bilan yozilsa — xato)
+ * @returns {{ ok: true, key: string[] } | { ok: false, error: string }}
  */
-export function parseKeyForLabels(text, labels) {
+export function parseSingleKey(text, label, labels) {
   const lines = splitLines(text);
-  if (!lines.length) return { ok: false, error: "Kalit bo'sh." };
-  const labeled = lines.map((l) => l.match(LABELED_LINE));
-  const labeledCount = labeled.filter(Boolean).length;
-
-  const map = new Map();
-  if (labeledCount === lines.length) {
-    const labelSet = new Set(labels);
-    for (const m of labeled) {
-      const label = normalizeLabel(m[1]);
-      if (!labelSet.has(label)) return { ok: false, error: `"${label}" — bunday savol yo'q. Savollar: ${labels.join(', ')}` };
-      if (map.has(label)) return { ok: false, error: `${label}-savol ikki marta yozilgan.` };
-      map.set(label, splitKeys(m[2]));
-    }
-    const missing = labels.filter((l) => !map.has(l));
-    if (missing.length) return { ok: false, error: `Quyidagi savollar kaliti yo'q: ${missing.join(', ')}` };
-  } else if (lines.length === labels.length) {
-    const numbers = new Set(labels.map((l) => l.match(/^\d+/)[0]));
-    for (const [i, label] of labels.entries()) {
-      const parsed = positionalKey(lines[i], label, numbers);
-      if (parsed.error) return { ok: false, error: parsed.error };
-      map.set(label, parsed.keys);
-    }
-  } else if (labeledCount) {
-    return { ok: false, error: "Yo hamma qatorlar raqamli (36=javob), yo hammasi raqamsiz bo'lsin." };
-  } else {
-    return { ok: false, error: `${labels.length} ta javob (har biri yangi qatorda) kerak, siz ${lines.length} ta yubordingiz.` };
+  if (!lines.length) return { ok: false, error: 'Javob yozilmagan.' };
+  if (lines.length > 1) {
+    return {
+      ok: false,
+      error:
+        "Har bir savol kaliti alohida xabarda yuboriladi — xabarda bitta qator bo'lsin. " +
+        "Bir nechta to'g'ri javob bo'lsa, ularni vergul bilan ajrating.",
+    };
   }
-  const empty = labels.filter((l) => !map.get(l).length);
-  if (empty.length) return { ok: false, error: `Quyidagi savollar uchun javob yozilmagan: ${empty.join(', ')}` };
-  return { ok: true, items: labels.map((label) => ({ label, key: map.get(label) })) };
+  const [, num, sub] = label.match(/^(\d+)([a-z]?)$/);
+  const wrong = (other) => ({
+    ok: false,
+    error: `Hozir ${questionName(label)} kaliti so'ralmoqda, siz esa ${questionName(other)} uchun yozdingiz.`,
+  });
+  let body = lines[0];
+  // "40a=ot", "37) javob" — raqami bilan yozilgan
+  const labeled = labeledLine(body);
+  if (labeled && labels.includes(labeled.label)) {
+    if (labeled.label !== label) return wrong(labeled.label);
+    body = labeled.value;
+  }
+  // "39-javob", "b)chunki" — boshqa savolniki (masalan, savol tashlab ketilgan)
+  const other = body.match(new RegExp(`^(\\d+)${NUMBER_PREFIX}`))?.[1];
+  if (other && other !== num && labels.some((l) => l.match(/^\d+/)[0] === other)) return wrong(other);
+  const letter = sub && body.replace(new RegExp(`^${num}${NUMBER_PREFIX}`), '').match(/^([a-f])\s*\)/i)?.[1].toLowerCase();
+  if (letter && letter !== sub) return wrong(num + letter);
+  const variants = splitVariants(stripLabelPrefix(body, label, { trailing: false })).map(stripTrailingSeparators);
+  const key = [...new Set(variants.filter(Boolean))];
+  if (!key.length) return { ok: false, error: 'Javob yozilmagan.' };
+  return { ok: true, key };
 }
 
 /** Esse bali: 0–75 oralig'idagi son (vergul yoki nuqta bilan), 0.1 gacha yaxlitlanadi; aks holda null */

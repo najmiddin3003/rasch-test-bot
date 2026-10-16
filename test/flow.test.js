@@ -148,7 +148,7 @@ const OPEN_KEY = [
   '43b=Bobur',
   '44a=ʼ',
   '44b=.',
-].join('\n');
+];
 // Hammasi to'g'ri, lekin tutuq/tire/kasr/nuqta boshqacha yozilgan
 const OPEN_ALL_RIGHT = ['o‘g‘il', 'tire', '`', '12', 'Ot', 'kesim', 'ega', 'aniqlovchi', '7', '1/2', 'navoiy', 'Bobur.', 'tutuq belgisi', 'nuqta'];
 
@@ -180,8 +180,19 @@ test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, y
   await message(ADMIN, 'e' + CLOSED_KEY.slice(1).join(''));
   assert.match(lastText(ADMIN), /1-savolda faqat A–D/);
   await message(ADMIN, CLOSED_KEY.join(''));
-  assert.match(lastText(ADMIN), /14 ta javob/);
-  await message(ADMIN, OPEN_KEY);
+  assert.match(lastText(ADMIN), /14 ta savol[\s\S]*36-savol<\/b> kaliti \(1\/14\)/);
+  // Yozma kalit bittalab: hammasi bitta xabarda — rad etiladi
+  await message(ADMIN, OPEN_KEY.join('\n'));
+  assert.match(lastText(ADMIN), /alohida xabarda/);
+  // ",,;" — vergul yoki nuqtali vergul; xato bo'lsa «Oldingi savolni qayta yozish»
+  await message(ADMIN, ',,;');
+  assert.match(lastText(ADMIN), /36-savol: <code>,<\/code> yoki <code>;<\/code>[\s\S]*37-savol<\/b> kaliti \(2\/14\)/);
+  await callback(ADMIN, 'nt:back');
+  assert.match(lastText(ADMIN), /36-savol kaliti \(<code>,<\/code> yoki <code>;<\/code>\) o'chirildi[\s\S]*\(1\/14\)/);
+  // Savol tashlab ketilsa — keyingi savol raqami bilan yozilgan javob qabul qilinmaydi
+  await message(ADMIN, OPEN_KEY[1]);
+  assert.match(lastText(ADMIN), /36-savol kaliti so'ralmoqda, siz esa 37-savol uchun/);
+  for (const line of OPEN_KEY) await message(ADMIN, line);
   assert.match(lastText(ADMIN), /Esse:<\/b> bor/);
   await callback(ADMIN, 'nt:save');
 
@@ -192,6 +203,7 @@ test("Ona tili (Milliy sertifikat): tugmalar, bittalab yozish, esse, tuzatish, y
   assert.equal(created.items.length, 49);
   assert.deepEqual(created.items.slice(0, 35).map((i) => i.options), [...Array(32).fill(4), 6, 6, 6]);
   assert.deepEqual(created.items.slice(35).map((i) => i.label), ['36', '37', '38', '39', '40a', '40b', '41a', '41b', '42a', '42b', '43a', '43b', '44a', '44b']);
+  assert.deepEqual(created.items.slice(35).map((i) => i.key), OPEN_KEY.map((l) => [l.split('=')[1]]), "0,5 — o'nli kasr");
 
   const code = created.code;
   const A = 2001; // hammasi tugmalar bilan, hammasi to'g'ri, esse 61,5
